@@ -1,0 +1,14 @@
+# 配布物に入るパッケージ（開発用は requirements-dev.lock）。mutagen は GPL のため配布物に入れない
+brotli==1.2.1
+certifi==2026.10.23
+charset-normalizer==3.5.2
+idna==3.20
+platformdirs==4.14.5
+pycryptodomex==3.24.2
+PySide6_Essentials==6.12.0
+requests==2.34.2
+shiboken6==6.12.0
+urllib3==2.8.0
+websockets==17.4
+yt-dlp==2026.10.26
+yt-dlp-ejs==0.8.0

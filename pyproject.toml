@@ -1,0 +1,20 @@
+[project]
+name = "clipdl"
+version = "0.1.0b1"
+description = "YouTube / Twitch 切り抜き用ダウンローダー"
+requires-python = ">=3.12"
+dependencies = [
+    "yt-dlp[default]>=2026.10.26",
+    "platformdirs>=4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9.0", "pysequoia==0.1.36", "pyinstaller==6.22.3"]  # pysequoia は署名検証の答え合わせ用（配布物に入れない）
+gui = ["PySide6"]  # フェーズ2
+
+[project.scripts]
+clipdl = "clipdl.cli.main:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,6 @@
+# vendor バイナリの SHA-256（取得日 2026-11-06。ffmpeg は同日に固定リリースから取り直し）
+# 形式: sha256  ファイル名  取得元  照合方法
+
+a6103833b86a94057c9d99cb8211ae7d3742153566cdbaedefeb9c5e36ca2a7c  ffmpeg-n9.0.2-47-gb204e94e90-win64-lgpl-shared-9.0.zip  https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-05-12-48/ffmpeg-n9.0.2-47-gb204e94e90-win64-lgpl-shared-9.0.zip  GitHub asset digest 一致 / 公式 checksums.sha256 一致（固定リリース、2026-11-06 取り直し。中身は以前の latest 版と全ファイル同一）
+cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf  deno-x86_64-pc-windows-msvc.zip  https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-pc-windows-msvc.zip  GitHub asset digest 一致 / 公式 deno-x86_64-pc-windows-msvc.zip.sha256sum 一致
+8b1b0695f2b1b6bf0d2535fab4b84032951cded8cf4078dfdf4d58e391c813a0  TwitchDownloaderCLI-1.56.5-Windows-x64.zip  https://github.com/lay295/TwitchDownloader/releases/download/1.56.5/TwitchDownloaderCLI-1.56.5-Windows-x64.zip  GitHub asset digest 一致

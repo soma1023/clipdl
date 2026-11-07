@@ -1,0 +1,24 @@
+# 仮想環境
+.venv/
+
+# vendor のバイナリ（取得手順とハッシュは vendor/CHECKSUMS.txt で管理）
+vendor/*
+!vendor/CHECKSUMS.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ビルド成果物
+build/
+dist/
+
+# 動作確認の出力
+out/
+*.part
+*.ytdl
+
+# モックの生成物（build_mockup.py が作る中間ファイル）
+docs/mockup/_render.html
