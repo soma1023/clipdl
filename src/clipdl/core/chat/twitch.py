@@ -101,6 +101,25 @@ def merge_twitch_json(old: dict, new: dict) -> dict:
     ends = [float((d.get("video") or {}).get("end") or 0) for d in (old, new)]
     video["start"], video["end"] = min(starts), max(ends)
     out["video"], out["comments"] = video, comments
+    out["embeddedData"] = merge_embedded(old.get("embeddedData"), new.get("embeddedData"))
+    return out
+
+
+def merge_embedded(a: dict | None, b: dict | None) -> dict | None:
+    """埋め込み画像（エモート・バッジなど）を、重複を除いてまとめる。"""
+    if not a and not b:
+        return None
+    out: dict = {}
+    for key in ("thirdParty", "firstParty", "twitchBadges", "twitchBits"):
+        seen, items = set(), []
+        for src in (b or {}, a or {}):
+            for item in src.get(key) or []:
+                k = item.get("id") or item.get("name") or json.dumps(item, sort_keys=True)[:200]
+                if k in seen:
+                    continue
+                seen.add(k)
+                items.append(item)
+        out[key] = items
     return out
 
 
@@ -131,8 +150,9 @@ class TwitchChatProvider(ChatProvider):
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp_dir = Path(tempfile.mkdtemp(prefix="clipdl-tdcli-"))
         tmp_out = tmp_dir / "chat.json"
+        # -E: エモート・バッジの画像を埋め込む（スタイル「Twitch配信風」を通信なしで描画するため）
         args = [exe, "chatdownload", "--id", vod_id, "-o", str(tmp_out), "--collision", "Overwrite",
-                "--banner", "false", "--temp-path", str(tmp_dir)]
+                "--banner", "false", "--temp-path", str(tmp_dir), "-E"]
         if span is not None:
             start, end = span
             args += ["-b", format_time(max(0.0, start)), "-e", format_time(end)]

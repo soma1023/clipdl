@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_TEMPLATE = "{date}_{channel}_{title}"
 # 利用規約の版（TERMS.md の「規約の版」と合わせる。上げると次回の起動時にあらためて同意を求める）
-TERMS_VERSION = "3"
+TERMS_VERSION = "4"
 
 
 @dataclass
@@ -31,7 +31,14 @@ class Settings:
     cookies_from_browser: str = ""   # "firefox" / "chrome:Profile 1" など。空なら使わない
     cookies_file: str = ""
     language: str = "ja"
-    ass_style: str = "vertical"      # "vertical"（縦流れ・Twitch 風）/ "scroll"（横流れ・ニコニコ風）
+    ass_style: str = "vertical"      # ASS の形: "vertical"（縦流れ）/ "scroll"（横流れ・ニコニコ風）
+    # チャットのスタイル（オーバーレイ動画の見た目）: "twitch"（Twitch配信風）/ "vertical"（シンプル）/ "scroll"（横流れ）
+    chat_style: str = "twitch"
+    # 「Twitch配信風」の見た目（画面には出さない。高さ 1080 のときの値で、クリップの高さに合わせて拡大縮小する）
+    twitch_style_width: int = 420
+    twitch_style_font_size: int = 22
+    twitch_style_bg_opacity: float = 0.55   # 背景（黒）の濃さ 0〜1
+    twitch_style_font: str = "Yu Gothic UI"
     overlay_codec: str = "qtrle"     # オーバーレイ動画の形式（qtrle / png / prores）
     overlay_crop: bool = True        # チャット欄の幅だけ切り出す（縦流れのときだけ有効）
     overlay_fps: str = "30"          # "30" / "60" / ""（クリップ本体に合わせる）

@@ -21,6 +21,7 @@ from ..core.ffmpeg import ENCODER_CANDIDATES, ENCODER_NAMES, configure_encoders
 from ..core.logging_setup import export_logs, setup_logging
 from ..core.models import CfrMode, ChatFormat, CutMode, Progress
 from ..core.naming import TemplateError, validate_template
+from ..core.pipeline import JobSpec, style_options
 from ..core.presets import PRESETS
 from ..core.queue import JobQueue, JobState
 from ..core.settings import TERMS_VERSION, Settings
@@ -55,6 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--chat", dest="chat", action="store_true", default=s.save_chat, help="チャットも保存（初期値）")
     chat.add_argument("--no-chat", dest="chat", action="store_false", help="チャットを保存しない")
     p.add_argument("--chat-only", action="store_true", help="動画は保存せずチャットだけ保存")
+    p.add_argument("--chat-style", choices=["twitch", "vertical", "scroll"], default=s.chat_style,
+                   help="オーバーレイ動画のスタイル: twitch=Twitch配信風（エモート・バッジつき） / vertical=シンプル / "
+                        "scroll=横流れ（ニコニコ風）")
     p.add_argument("--chat-formats", default=",".join(s.chat_formats), help="json,csv,ass,mov から選ぶ（カンマ区切り。mov = オーバーレイ動画・背景透明の ProRes 4444）")
     p.add_argument("--comments", action="store_true", default=s.save_comments, help="YouTube の通常コメントも保存")
     p.add_argument("--max-comments", type=int, default=None, help="コメントの最大件数")
@@ -182,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     for url in args.urls:
         q.add(JobSpec(url=url, ranges=ranges, download=opts, save_chat=args.chat or args.chat_only,
                       chat_formats=chat_formats, save_comments=args.comments, max_comments=args.max_comments,
-                      video=not args.chat_only))
+                      video=not args.chat_only, **style_options(settings, args.chat_style)))
     try:
         q.run_until_idle()
     except KeyboardInterrupt:

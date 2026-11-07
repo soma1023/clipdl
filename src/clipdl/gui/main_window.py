@@ -13,14 +13,15 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, 
                                QWidget)
 
 from .. import __version__
-from ..core.chat.overlay import OverlayOptions, estimate_size_mb, format_size
+from ..core.chat.overlay import estimate_size_mb, format_size
 from ..core.cookies import SUPPORTED_BROWSERS, CookieOptionError, cookie_params
 from ..core.downloader import DownloadOptions
 from ..core.errors import UserError
 from ..core.logging_setup import export_logs
 from ..core.models import CfrMode, ChatFormat, ClipRange, CutMode, VideoInfo
 from ..core.naming import TemplateError, validate_template
-from ..core.pipeline import JobSpec
+from ..core.chat.twitch_style import estimate_size_mb as twitch_estimate_mb
+from ..core.pipeline import JobSpec, style_options
 from ..core.presets import PRESETS
 from ..core.queue import Job, JobState
 from ..core.settings import Settings
@@ -353,13 +354,13 @@ class MainWindow(QMainWindow):
         fr.addWidget(self.estimate)
         fr.addStretch(1)
         g.addLayout(fr, 3, 0, 1, 2)
-        self.ass_style = combo([(tr("adv.ass.vertical"), "vertical"), (tr("adv.ass.scroll"), "scroll")],
-                               s.ass_style)
+        self.chat_style = combo([(tr("style.twitch"), "twitch"), (tr("style.vertical"), "vertical"),
+                                 (tr("style.scroll"), "scroll")], s.chat_style)
         self.template = QLineEdit(s.filename_template)
         self.template.editingFinished.connect(self._settings_changed)
-        g.addWidget(sub_label(tr("adv.ass_style")), 4, 0)
+        g.addWidget(sub_label(tr("adv.chat_style")), 4, 0)
         g.addWidget(sub_label(tr("adv.template")), 4, 1)
-        g.addWidget(self.ass_style, 5, 0)
+        g.addWidget(self.chat_style, 5, 0)
         g.addWidget(self.template, 5, 1)
         items = [(tr("adv.cookies.none"), "")] + [(b.capitalize(), b) for b in SUPPORTED_BROWSERS
                                                    if b != "safari"]
@@ -417,7 +418,8 @@ class MainWindow(QMainWindow):
         s.cut_mode = self.cut.currentData()
         s.cfr_mode = self.cfr.currentData()
         s.chat_formats = [k for k, cb in self.fmt.items() if cb.isChecked()]
-        s.ass_style = self.ass_style.currentData()
+        s.chat_style = self.chat_style.currentData()
+        s.ass_style = "scroll" if s.chat_style == "scroll" else "vertical"
         s.filename_template = self.template.text().strip() or s.filename_template
         ck = self.cookies.currentData()
         s.cookies_from_browser = "" if ck in ("", "__file__") else ck
@@ -449,13 +451,13 @@ class MainWindow(QMainWindow):
             return
         height = min(self.info.height or 1080, 1080) if self.info and self.preset.currentData() == "edit1080" \
             else (self.info.height if self.info and self.info.height else 1080)
-        mb = estimate_size_mb(total, height, options=self._overlay_options())
+        st = style_options(self.settings)
+        if st["chat_style"] == "twitch":
+            mb = twitch_estimate_mb(total, height, st["twitch_style"], st["overlay"])
+        else:
+            mb = estimate_size_mb(total, height, options=st["overlay"])
         self.estimate.setText(tr("adv.overlay.estimate", size=format_size(mb), detail=detail))
 
-    def _overlay_options(self) -> OverlayOptions:
-        s = self.settings
-        return OverlayOptions(codec=s.overlay_codec, crop=s.overlay_crop and s.ass_style == "vertical",
-                              fps=s.overlay_fps or None)
 
     def _cookie_opts(self) -> dict:
         return cookie_params(self.settings.cookies_from_browser, self.settings.cookies_file)
@@ -467,8 +469,8 @@ class MainWindow(QMainWindow):
                                cut_mode=CutMode(s.cut_mode), cfr_mode=CfrMode(s.cfr_mode),
                                template=s.filename_template, cookie_opts=self._cookie_opts())
         return JobSpec(url=url, ranges=ranges, download=opts, save_chat=s.save_chat,
-                       chat_formats=tuple(ChatFormat(f) for f in s.chat_formats), overlay=self._overlay_options(),
-                       ass_style=s.ass_style, info=info)
+                       chat_formats=tuple(ChatFormat(f) for f in s.chat_formats), info=info,
+                       **style_options(s))
 
     def _download(self):
         self._settings_changed()

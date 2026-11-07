@@ -12,7 +12,9 @@ from .chat.base import ChatProvider, ChatUnavailable
 from .chat.cache import ChatCache, union_span
 from .chat.clipping import clip_messages
 from .chat.export import spread_same_time, write_ass, write_comments_csv, write_csv, write_json
+from .chat import twitch_style
 from .chat.overlay import CODECS, OverlayOptions, VideoGeometry, render_overlay
+from .chat.twitch_style import TwitchStyleOptions
 from .chat.twitch import TwitchChatProvider
 from .chat.youtube_comments import fetch_comments
 from .chat.youtube_live import YouTubeLiveChatProvider
@@ -38,6 +40,8 @@ class JobSpec:
     video: bool = True   # False ならチャットだけ
     overlay: OverlayOptions = field(default_factory=OverlayOptions)
     ass_style: str = "vertical"          # "vertical"（縦流れ）/ "scroll"（横流れ・ニコニコ風）
+    chat_style: str = "twitch"           # オーバーレイ動画: "twitch"（Twitch配信風）/ "vertical" / "scroll"
+    twitch_style: TwitchStyleOptions = field(default_factory=TwitchStyleOptions)
     info: VideoInfo | None = None         # GUI で取得済みの動画情報（あれば取り直さない）
 
 
@@ -48,6 +52,24 @@ class JobResult:
     clips: list[ClipOutput] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)   # 計測値など（警告ではない情報）
     warnings: list[str] = field(default_factory=list)
+
+
+CHAT_STYLES = ("twitch", "vertical", "scroll")   # Twitch配信風 / シンプル（縦流れ） / 横流れ（ニコニコ風）
+
+
+def style_options(settings, chat_style: str | None = None) -> dict:
+    """設定から JobSpec のスタイル関係の指定を作る（GUI と CLI で共通）。"""
+    style = chat_style or getattr(settings, "chat_style", "twitch")
+    if style not in CHAT_STYLES:
+        style = "twitch"
+    overlay = OverlayOptions(codec=settings.overlay_codec if settings.overlay_codec in CODECS else "qtrle",
+                             crop=bool(settings.overlay_crop) and style == "vertical",
+                             fps=settings.overlay_fps or None)
+    tw = TwitchStyleOptions(width=int(settings.twitch_style_width), font_size=int(settings.twitch_style_font_size),
+                            bg_opacity=min(1.0, max(0.0, float(settings.twitch_style_bg_opacity))),
+                            font=str(settings.twitch_style_font or "Yu Gothic UI"))
+    return {"chat_style": style, "ass_style": "scroll" if style == "scroll" else "vertical",
+            "overlay": overlay, "twitch_style": tw}
 
 
 def chat_provider_for(info: VideoInfo, cookie_opts: dict) -> ChatProvider | None:
@@ -126,7 +148,13 @@ def _save_chat(info: VideoInfo, spec: JobSpec, ranges: list[ClipRange], opts: Do
     if provider is None:
         raise ChatUnavailable("このサイトのチャット取得には対応していません")
     span = union_span([(r.start, r.end) for r in ranges]) if ranges else None
+    use_twitch_style = ChatFormat.MOV in spec.chat_formats and spec.chat_style == twitch_style.STYLE
+    if span is not None and use_twitch_style and info.site == "twitch":
+        # 最初のフレームからチャット欄が埋まって見えるよう、開始前のコメントも取得する
+        span = (max(0.0, span[0] - twitch_style.PREROLL), span[1])
     messages, stats = ChatCache().get(provider, info, span, emit, cancel)
+    embedded = twitch_style.load_embedded(stats.raw_path) if use_twitch_style and info.site == "twitch" else None
+    images = None
     notes.append(stats.summary())
     opts.output_dir.mkdir(parents=True, exist_ok=True)
     files: list[Path] = []
@@ -157,7 +185,22 @@ def _save_chat(info: VideoInfo, spec: JobSpec, ranges: list[ClipRange], opts: Do
                                title=info.title)
             if want_ass:
                 files.append(ass_path)
-            if want_mov:
+            done_twitch_style = False
+            if want_mov and use_twitch_style:
+                if images is None and info.site != "twitch":
+                    images = twitch_style.ImageStore()
+                try:
+                    ov = _render_twitch_style(info, spec, clip, messages, geo, embedded, images, base, stem, emit,
+                                              cancel, spread)
+                    files.append(ov.path)
+                    notes.append(_overlay_note(ov, geo, "Twitch配信風"))
+                    done_twitch_style = True
+                except Cancelled:
+                    raise
+                except Exception as e:  # noqa: BLE001 — 書き出せなければシンプルで書き出す
+                    log.exception("Twitch配信風で書き出せませんでした")
+                    notes.append(f"Twitch配信風で書き出せなかったため、シンプルで書き出しました（{e}）")
+            if want_mov and not done_twitch_style:
                 idx = clip.index if clip else None
                 emit(Progress("overlay", 0.0, "オーバーレイ動画を書き出し中", idx))
                 ov = render_overlay(ass_path, base.with_name(stem + ".chat_overlay.mov"), geo,
@@ -168,18 +211,51 @@ def _save_chat(info: VideoInfo, spec: JobSpec, ranges: list[ClipRange], opts: Do
                                     options=spec.overlay if spec.ass_style == "vertical"
                                     else replace(spec.overlay, crop=False))
                 files.append(ov.path)
-                size = ov.path.stat().st_size / 1048576
-                note = (f"オーバーレイ動画: {ov.path.name}（{CODECS[ov.codec]['label']} {ov.width}x{ov.height} "
-                        f"{ov.fps} fps {ov.duration:.2f} 秒 {size:.0f} MB・背景透明）")
-                if ov.crop_x:
-                    px, py = ov.premiere_position(geo.width, geo.height)
-                    note += (f" → Premiere では {geo.width}x{geo.height} のシーケンスで"
-                             f"「位置」を X={px:g} / Y={py:g} にすると元の位置に重なります")
-                notes.append(note)
+                notes.append(_overlay_note(ov, geo, "シンプル"))
             if tmp_ass is not None:
                 shutil.rmtree(tmp_ass.parent, ignore_errors=True)  # アプリが作った一時フォルダ
         log.info("チャット %s: %d 件", stem, len(msgs))
     return files
+
+
+def _overlay_note(ov, geo: VideoGeometry, style: str) -> str:
+    size = ov.path.stat().st_size / 1048576
+    note = (f"オーバーレイ動画（{style}）: {ov.path.name}（{CODECS[ov.codec]['label']} {ov.width}x{ov.height} "
+            f"{ov.fps} fps {ov.duration:.2f} 秒 {size:.0f} MB・背景透明）")
+    if ov.crop_x:
+        px, py = ov.premiere_position(geo.width, geo.height)
+        note += (f" → Premiere では {geo.width}x{geo.height} のシーケンスで"
+                 f"「位置」を X={px:g} / Y={py:g} にすると元の位置に重なります")
+    return note
+
+
+def _render_twitch_style(info: VideoInfo, spec: JobSpec, clip, messages, geo: VideoGeometry, embedded, images,
+                         base: Path, stem: str, emit, cancel: CancelToken, spread: bool):
+    """chatrender で「Twitch配信風」のオーバーレイ動画を書き出す。"""
+    start = clip.start if clip else 0.0
+    end = clip.end if clip else start + geo.duration
+    window = [m for m in messages if start - twitch_style.PREROLL <= m.time < end]
+    if spread:
+        window = spread_same_time(window)
+    data, st = twitch_style.build_render_json(window, info.site, embedded=embedded, images=images,
+                                              video_id=info.id, title=info.title, start=start, end=end)
+    tmp = Path(tempfile.mkdtemp(prefix="clipdl-twstyle-"))
+    try:
+        jp = tmp / "chat.json"
+        jp.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
+        idx = clip.index if clip else None
+        emit(Progress("overlay", 0.0, "オーバーレイ動画を書き出し中（Twitch配信風）", idx))
+        offline = info.site != "twitch" or twitch_style.has_embedded_images(embedded)
+        ov = twitch_style.render(jp, base.with_name(stem + ".chat_overlay.mov"), geo, start, end,
+                                 opts=spec.twitch_style, overlay=spec.overlay, offline=offline, site=info.site,
+                                 on_progress=lambda r, idx=idx: emit(
+                                     Progress("overlay", r, "オーバーレイ動画を書き出し中（Twitch配信風）", idx)),
+                                 cancel=cancel.event)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)  # アプリが作った一時フォルダ
+    log.info("Twitch配信風: コメント %d 件 / エモート画像 %d / バッジ画像 %d / 取得できなかった画像 %d",
+             st["comments"], st["emotes"], st["badges"], st["image_failed"])
+    return ov
 
 
 def _geometry(video: Path | None, info: VideoInfo, duration: float) -> VideoGeometry:

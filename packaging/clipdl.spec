@@ -18,7 +18,8 @@ ROOT = Path(SPECPATH).parent
 SRC = ROOT / "src"
 PYLIB_PACKAGES = {"yt_dlp": Path(yt_dlp.__file__).parent, "yt_dlp_ejs": Path(yt_dlp_ejs.__file__).parent}
 
-datas = [(str(SRC / "clipdl" / "core" / "keys"), "clipdl/core/keys")]
+datas = [(str(SRC / "clipdl" / "core" / "keys"), "clipdl/core/keys"),
+         (str(SRC / "clipdl" / "core" / "chat" / "badges"), "clipdl/core/chat/badges")]  # Twitch配信風の自作バッジ
 for name, src in PYLIB_PACKAGES.items():
     for f in src.rglob("*"):
         if f.is_file() and "__pycache__" not in f.parts and f.suffix != ".pyc":

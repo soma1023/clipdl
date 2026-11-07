@@ -26,3 +26,6 @@ docs/mockup/_render.html
 # 秘密鍵（リポジトリには絶対に入れない。保存先は packaging/keygen.py を参照）
 *.pem
 *.key.private
+
+# チャットのデザイン比較の画像（実在の配信のチャットが写っているため、リポジトリに入れない）
+docs/chat-style/
