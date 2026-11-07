@@ -438,3 +438,48 @@ def test_after_startup_prefers_rollback_result_over_plan(tmp_path, env, monkeypa
     out = su.after_startup()
     assert out and out.status == "rolled_back"
     assert not su.ok_marker_path().exists() and not su.plan_path().exists() and not su.result_path().exists()
+
+
+# ------------------------------------------------------------------------ 一時フォルダの片付け
+
+
+def test_cleanup_temp_updaters_removes_all_copies_regardless_of_age(tmp_path):
+    for name in ("clipdl-updater-1-1.exe", "clipdl-updater-2-2.exe"):
+        (tmp_path / name).write_bytes(b"upd")       # 作ったばかり（年齢は見ない）
+    (tmp_path / "other.exe").write_bytes(b"x")       # 関係ないファイルは消さない
+    assert su._cleanup_temp_updaters(tmp_path) == 2
+    assert [f.name for f in tmp_path.iterdir()] == ["other.exe"]
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="Windows の使用中ファイルの扱いを確かめる")
+def test_cleanup_temp_updaters_keeps_running_copy(tmp_path):
+    import shutil
+    import subprocess
+    import sys
+    running = tmp_path / "clipdl-updater-9-9.exe"
+    shutil.copy2(sys.executable, running)            # 動いている exe は Windows が消させない
+    proc = subprocess.Popen([str(running), "-c", "import time; time.sleep(30)"])
+    try:
+        (tmp_path / "clipdl-updater-1-1.exe").write_bytes(b"upd")
+        assert su._cleanup_temp_updaters(tmp_path) == 1
+        assert running.exists()
+    finally:
+        proc.kill()
+        proc.wait()
+    assert su._cleanup_temp_updaters(tmp_path) == 1   # 終わったあとの起動で消える
+
+
+def test_cleanup_runs_after_successful_update_and_before_swap(tmp_path, key, env, monkeypatch):
+    calls = []
+    monkeypatch.setattr(su, "_cleanup_temp_updaters", lambda *a: calls.append("cleanup") or 0)
+    _signed(env, key, version="0.2.0")
+    inst = _install(tmp_path)
+    p = su.prepare("v0.2.0", target=inst)
+    launched = []
+    su.start_swap(p, pid=1, launch=launched.append)
+    assert calls == ["cleanup"]                      # コピーを作る前に、前回までの分を消す
+    Path(launched[0][0]).unlink()
+    monkeypatch.setattr(su, "__version__", "0.2.0")
+    monkeypatch.setattr(su, "install_dir", lambda: inst.resolve())
+    out = su.after_startup()
+    assert out and out.status == "ok" and calls == ["cleanup", "cleanup"]   # 更新が成功した起動でも消す

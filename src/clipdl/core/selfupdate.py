@@ -357,6 +357,7 @@ def start_swap(p: Prepared, pid: int | None = None, launch=None) -> Plan:
             f.unlink()
         except FileNotFoundError:
             pass
+    _cleanup_temp_updaters()   # 前回までのコピー（コマンドライン版で更新したときなど）
     tmp = Path(tempfile.gettempdir()) / f"clipdl-updater-{int(time.time())}-{os.getpid()}.exe"
     shutil.copy2(p.install_dir / UPDATER_EXE, tmp)
     cmd = [str(tmp), str(pp)]
@@ -405,6 +406,7 @@ def after_startup() -> AfterUpdate | None:
         ok_marker_path().write_text(json.dumps({"version": __version__, "time": time.time()}), "utf-8")
         out = AfterUpdate("ok", f"clipdl {__version__} に更新しました。", __version__)
         _cleanup_files(pp, res, wait_result=True)
+        _cleanup_temp_updaters()   # 今動いているコピーは消せないので残り、次の起動で消える
         return out
     if res.is_file():   # 前回の成功の記録（status = ok）を片付ける
         _cleanup_files(pp, res)
@@ -422,12 +424,19 @@ def _cleanup_files(*paths: Path, wait_result: bool = False) -> None:
             pass
 
 
-def _cleanup_temp_updaters() -> None:
-    """一時フォルダに残った古い入れ替え用プログラムのコピーを消す（1 日以上前のもの）。"""
-    cutoff = time.time() - 24 * 3600
-    for f in Path(tempfile.gettempdir()).glob("clipdl-updater-*.exe"):
+def _cleanup_temp_updaters(temp_dir: Path | None = None) -> int:
+    """一時フォルダに残った入れ替え用プログラムのコピーを消す（消せた数を返す）。
+
+    コピーは更新のたびに 1 つ作られる（約 8 MB）。まだ動いているコピーは Windows が使用中として
+    消させないので、年齢は見ずに、消せるものを全部消す。
+    """
+    n = 0
+    for f in Path(temp_dir or tempfile.gettempdir()).glob("clipdl-updater-*.exe"):
         try:
-            if f.stat().st_mtime < cutoff:
-                f.unlink()
+            f.unlink()
+            n += 1
         except OSError:
-            pass
+            pass   # 動いている（入れ替えの途中）・権限が無いものは、次の起動で
+    if n:
+        log.info("一時フォルダの入れ替え用プログラムのコピーを %d 個消しました", n)
+    return n
