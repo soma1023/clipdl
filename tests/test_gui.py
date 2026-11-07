@@ -85,3 +85,144 @@ def test_message_bar_shows_several_actions_and_clears_after_click(app):
     assert clicked[-1] == "single"
     bar.show_error("err")
     assert bar.action_buttons == []
+
+
+# ---------------------------------------------------------------------------- 見た目（デザインと明るさ）
+
+
+@pytest.fixture
+def window(app, tmp_path, monkeypatch):
+    for k in ("CLIPDL_CONFIG_DIR", "CLIPDL_CACHE_DIR", "CLIPDL_DATA_DIR", "CLIPDL_LOG_DIR"):
+        monkeypatch.setenv(k, str(tmp_path / k))
+    from clipdl.core.settings import Settings
+    from clipdl.gui import theme
+    from clipdl.gui.main_window import MainWindow
+    s = Settings()
+    theme.apply(app, s.ui_design, s.ui_mode)
+    w = MainWindow(s)
+    w._fetch_timer.timeout.disconnect()   # 動画情報を取りに行かない
+    yield w
+    w.bridge.shutdown()
+    w.deleteLater()
+    theme.apply(app, "studio", "auto")
+
+
+@pytest.mark.parametrize("design", ["studio", "pop", "minimal"])
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_every_design_and_mode_builds_a_stylesheet(app, design, mode):
+    from clipdl.gui import theme
+    theme.apply(app, design, mode)
+    d, c = theme.current()
+    assert d.key == design and c.dark == (mode == "dark") and theme.is_dark() == (mode == "dark")
+    css = app.styleSheet()
+    assert c.accent in css and "QPushButton#primary" in css and "QFrame#drop" in css
+    assert app.palette().color(app.palette().ColorRole.Window).name().upper() == c.bg.upper()
+    theme.apply(app, "studio", "auto")
+
+
+def test_unknown_design_falls_back_and_auto_follows_os(app):
+    from clipdl.gui import theme
+    theme.apply(app, "nope", "nope")
+    d, c = theme.current()
+    assert d.key == "studio" and c.dark == theme.os_is_dark()
+
+
+def test_url_area_switches_between_drop_and_input(window):
+    w = window
+    w.show()
+    assert w.drop.isVisible() and not w.url_edit.isVisible()          # 空なら大きな貼り付け欄
+    assert not w.dl_btn.isEnabled()
+    w.drop.pasted.emit("https://www.youtube.com/watch?v=abc")
+    assert w.url_edit.isVisible() and not w.drop.isVisible()
+    assert w.dl_btn.isEnabled() and w.dl_btn.text() == "動画全体をダウンロード"
+    w.url_edit.clear()
+    w.url_edit.clearFocus()
+    w._on_url_changed("")
+    assert w.drop.isVisible()
+    w.drop.typeRequested.emit()                                        # クリックや入力で入力欄に切り替わる
+    assert w.url_edit.isVisible()
+
+
+def test_download_button_text_follows_range_count(window):
+    w = window
+    w.url_edit.setText("https://www.youtube.com/watch?v=abc")
+    w._add_range()
+    assert w.dl_btn.text() == "ダウンロード"
+    w._add_range()
+    w._add_range()
+    assert w.dl_btn.text() == "3 つの範囲をダウンロード"
+    w.url_edit.setText("https://a.com/x https://b.com/y")
+    assert w.dl_btn.text() == "ダウンロード"
+
+
+def test_changing_design_in_settings_applies_and_saves(window):
+    from clipdl.core.settings import Settings
+    from clipdl.gui import theme
+    w = window
+    w.design.setCurrentIndex(w.design.findData("pop"))
+    w.mode.setCurrentIndex(w.mode.findData("light"))
+    d, c = theme.current()
+    assert d.key == "pop" and not c.dark
+    assert w._dl_full_slot.indexOf(w.dl_btn) >= 0                     # ポップはボタンを横幅いっぱいに
+    saved = Settings.load()
+    assert saved.ui_design == "pop" and saved.ui_mode == "light"
+    w.design.setCurrentIndex(w.design.findData("minimal"))
+    assert w._dl_row.indexOf(w.dl_btn) >= 0
+
+
+def test_selected_range_row_is_marked_by_property(window):
+    w = window
+    w._add_range()
+    w._add_range()
+    w._select_range(1)
+    assert [r.property("selected") for r in w.rows] == [False, True]
+
+
+def test_eta_clock_estimates_from_progress_rate():
+    from clipdl.gui.widgets import _EtaClock
+    now = [0.0]
+    c = _EtaClock(clock=lambda: now[0])
+    assert c.update(("video", 1), 0.10) is None          # 最初は測れない
+    now[0] = 10.0
+    assert c.update(("video", 1), 0.30) == pytest.approx(35.0)   # 10 秒で 20% → 残り 70% は 35 秒
+    now[0] = 11.0
+    assert c.update(("encode", 1), 0.05) is None         # 段階が変わったら測り直す
+    assert c.update(("encode", 1), None) is None
+
+
+def test_queue_card_states(app, tmp_path):
+    from clipdl.core.downloader import DownloadOptions
+    from clipdl.core.models import Progress
+    from clipdl.core.pipeline import JobResult, JobSpec
+    from clipdl.core.queue import Job, JobState
+    from clipdl.gui.widgets import QueueRow
+    job = Job(JobSpec(url="https://example.com/v", ranges=[], download=DownloadOptions(output_dir=tmp_path)))
+    row = QueueRow(job, "テスト")
+    assert row.thumb.pixmap() is not None and not row.thumb.pixmap().isNull()   # サムネが無くても代わりを描く
+    job.state, job.progress = JobState.RUNNING, Progress("video", 0.5)
+    row.refresh()
+    assert row.pct.text() == "50%" and row.bar.isVisibleTo(row)
+    assert row.remain.text() == "残り時間を計算中…"                      # 測れるまでは空欄にしない
+    row._eta.t0 -= 20
+    job.progress = Progress("video", 0.75)
+    row.refresh()
+    assert row.remain.text().startswith("残り 約")
+    job.state = JobState.PAUSED
+    row.refresh()
+    assert row.remain.text() == ""                                      # 動いていないときは出さない
+    job.state, job.result = JobState.DONE, JobResult(files=[tmp_path / "a"])
+    row.refresh()
+    assert row.status.property("state") == "done" and not row.bar.isVisibleTo(row)
+    job.state = JobState.FAILED
+    row.refresh()
+    assert row.status.property("state") == "failed"
+
+
+def test_app_icon_file_has_all_sizes():
+    import struct
+    from clipdl.gui.art import ASSET_DIR, ICON_SIZES
+    data = (ASSET_DIR / "clipdl.ico").read_bytes()
+    reserved, kind, count = struct.unpack("<HHH", data[:6])
+    assert (reserved, kind, count) == (0, 1, len(ICON_SIZES))
+    sizes = sorted(data[6 + 16 * i] or 256 for i in range(count))
+    assert sizes == sorted(ICON_SIZES)

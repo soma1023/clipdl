@@ -31,6 +31,8 @@ class Settings:
     cookies_from_browser: str = ""   # "firefox" / "chrome:Profile 1" など。空なら使わない
     cookies_file: str = ""
     language: str = "ja"
+    ui_design: str = "studio"        # 画面のデザイン: studio / pop / minimal
+    ui_mode: str = "auto"            # ダーク / ライト: auto（OS に合わせる）/ dark / light
     ass_style: str = "vertical"      # ASS の形: "vertical"（縦流れ）/ "scroll"（横流れ・ニコニコ風）
     # チャットのスタイル（オーバーレイ動画の見た目）: "twitch"（Twitch配信風）/ "vertical"（シンプル）/ "scroll"（横流れ）
     chat_style: str = "twitch"

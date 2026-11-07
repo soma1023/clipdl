@@ -19,7 +19,9 @@ SRC = ROOT / "src"
 PYLIB_PACKAGES = {"yt_dlp": Path(yt_dlp.__file__).parent, "yt_dlp_ejs": Path(yt_dlp_ejs.__file__).parent}
 
 datas = [(str(SRC / "clipdl" / "core" / "keys"), "clipdl/core/keys"),
-         (str(SRC / "clipdl" / "core" / "chat" / "badges"), "clipdl/core/chat/badges")]  # Twitch配信風の自作バッジ
+         (str(SRC / "clipdl" / "core" / "chat" / "badges"), "clipdl/core/chat/badges"),  # Twitch配信風の自作バッジ
+         (str(SRC / "clipdl" / "gui" / "assets"), "clipdl/gui/assets")]  # アプリのアイコン
+ICON = str(SRC / "clipdl" / "gui" / "assets" / "clipdl.ico")   # packaging/make_icon.py で作る
 for name, src in PYLIB_PACKAGES.items():
     for f in src.rglob("*"):
         if f.is_file() and "__pycache__" not in f.parts and f.suffix != ".pyc":
@@ -46,9 +48,9 @@ def analysis(script):
 gui_a = analysis(SRC / "clipdl" / "gui" / "__main__.py")
 cli_a = analysis(SRC / "clipdl" / "__main__.py")
 
-gui_exe = EXE(PYZ(gui_a.pure), gui_a.scripts, [], exclude_binaries=True, name="clipdl",
+gui_exe = EXE(PYZ(gui_a.pure), gui_a.scripts, [], exclude_binaries=True, name="clipdl", icon=ICON,
               console=False, upx=False, version=None)
-cli_exe = EXE(PYZ(cli_a.pure), cli_a.scripts, [], exclude_binaries=True, name="clipdl-cli",
+cli_exe = EXE(PYZ(cli_a.pure), cli_a.scripts, [], exclude_binaries=True, name="clipdl-cli", icon=ICON,
               console=True, upx=False, version=None)
 
 coll = COLLECT(gui_exe, gui_a.binaries, gui_a.datas,
@@ -62,4 +64,4 @@ upd_a = Analysis([str(Path(SPECPATH) / "updater_entry.py")], pathex=[str(SRC)], 
                  excludes=["tkinter", "PySide6", "yt_dlp", "yt_dlp_ejs", "Cryptodome", "platformdirs", "pytest",
                            "PyInstaller", "setuptools", "pip"])
 upd_exe = EXE(PYZ(upd_a.pure), upd_a.scripts, upd_a.binaries, upd_a.datas, name="clipdl-updater",
-              console=False, upx=False, version=None)
+              icon=ICON, console=False, upx=False, version=None)

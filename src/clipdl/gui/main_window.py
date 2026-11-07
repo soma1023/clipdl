@@ -6,7 +6,7 @@ import re
 import urllib.request
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QEvent, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QMainWindow, QPushButton, QScrollArea, QToolButton, QVBoxLayout,
@@ -29,9 +29,10 @@ from ..core.timeutil import format_short, format_time
 from ..core.updater import check_updates
 from ..core.updater import update as update_components
 from ..core.ytdl import extract_info
+from . import art, theme
 from .i18n import language, tr
 from .range_bar import MIN_DURATION, RangeBar
-from .widgets import (ElidedLabel, MessageBar, QueueRow, RangeRow, card, step_header, sub_label)
+from .widgets import (DropArea, ElidedLabel, MessageBar, QueueRow, RangeRow, card, step_header, sub_label)
 from .workers import QueueBridge, run_in_thread
 
 log = logging.getLogger(__name__)
@@ -59,7 +60,10 @@ class MainWindow(QMainWindow):
         self.bridge.jobChanged.connect(self._on_job_changed)
 
         self.setWindowTitle(tr("app.title", version=__version__))
+        self.setWindowIcon(art.window_icon())
         self.setMinimumWidth(760)
+        self._thumb_src: QPixmap | None = None
+        self._typing_url = False
         central = QWidget()
         outer = QVBoxLayout(central)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -68,49 +72,99 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         body = QWidget()
+        body.setObjectName("body")
         self.body_lay = QVBoxLayout(body)
-        self.body_lay.setContentsMargins(16, 14, 16, 10)
-        self.body_lay.setSpacing(10)
+        self.body_lay.setContentsMargins(22, 4, 22, 18)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
         self.msg = MessageBar()
         outer.addWidget(self.msg)
         self.setCentralWidget(central)
 
+        self._build_header()
         self._build_url_card()
         self._build_range_card()
         self._build_settings_card()
         self._build_queue_card()
         self.body_lay.addStretch(1)
+        theme.notifier.changed.connect(self._restyle)
+        self._restyle()
 
         self._fetch_timer = QTimer(self, singleShot=True, interval=500)
         self._fetch_timer.timeout.connect(self._fetch_info)
         self._refresh_ranges()
         self._update_estimate()
 
+    # ================================================================== 見出し
+    def _build_header(self):
+        hd = QFrame()
+        hd.setObjectName("header")
+        h = QHBoxLayout(hd)
+        h.setContentsMargins(0, 10, 0, 6)
+        h.setSpacing(10)
+        icon = QLabel()
+        icon.setPixmap(art.app_icon(30))
+        name = QLabel("clipdl")
+        name.setObjectName("appname")
+        beta = QLabel(tr("beta", version=__version__))
+        beta.setObjectName("beta")
+        h.addWidget(icon)
+        h.addWidget(name)
+        h.addWidget(beta)
+        h.addStretch(1)
+        self.body_lay.addWidget(hd)
+
+    def _restyle(self):
+        """デザインが変わったときに、余白や並び方を合わせる（色や形はスタイルシートで変わる）。"""
+        d, _ = theme.current()
+        self.body_lay.setSpacing(14 if d.cards else 0)
+        self.queue_lay.setSpacing(8 if d.cards else 0)
+        self._place_download_button(d.button_full)
+        if self._thumb_src is not None:
+            self._show_thumb()
+
     # ================================================================== 1. URL
     def _build_url_card(self):
         f, lay = card()
-        lay.addWidget(step_header(1, tr("step.url")))
+        lay.addWidget(step_header(1, tr("step.url"), tr("step.url.hint")))
+        self.drop = DropArea()
+        self.drop.pasted.connect(self._paste_url)
+        self.drop.typeRequested.connect(self._start_typing_url)
+        lay.addWidget(self.drop)
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText(tr("url.placeholder"))
         self.url_edit.setClearButtonEnabled(True)
         self.url_edit.textChanged.connect(self._on_url_changed)
+        self.url_edit.installEventFilter(self)
         lay.addWidget(self.url_edit)
         row = QHBoxLayout()
-        row.setSpacing(12)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(14)
         self.thumb = QLabel()
-        self.thumb.setFixedSize(120, 68)
-        self.thumb.setStyleSheet("background: palette(mid); border-radius: 4px;")
+        self.thumb.setObjectName("thumb")
+        self.thumb.setFixedSize(176, 99)
         self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
         meta = QVBoxLayout()
-        meta.setSpacing(2)
+        meta.setSpacing(4)
         self.title_label = ElidedLabel("")
         self.title_label.setObjectName("title")
-        self.meta_label = sub_label("")
+        self.meta_label = ElidedLabel("")
+        self.meta_label.setObjectName("meta")
+        self.chips = QHBoxLayout()
+        self.chips.setSpacing(6)
+        self.chip_labels = []
+        for _ in range(3):
+            c = QLabel()
+            c.setObjectName("chip")
+            c.hide()
+            self.chips.addWidget(c)
+            self.chip_labels.append(c)
+        self.chips.addStretch(1)
         meta.addStretch(1)
         meta.addWidget(self.title_label)
         meta.addWidget(self.meta_label)
+        meta.addSpacing(2)
+        meta.addLayout(self.chips)
         meta.addStretch(1)
         row.addWidget(self.thumb)
         row.addLayout(meta, 1)
@@ -119,6 +173,30 @@ class MainWindow(QMainWindow):
         self.info_row.hide()
         lay.addWidget(self.info_row)
         self.body_lay.addWidget(f)
+        self._update_url_mode()
+
+    # URL が空のときは大きな貼り付け欄を出し、打ち込むときや貼ったあとは入力欄に切り替える
+    def _update_url_mode(self):
+        empty = not self.url_edit.text().strip()
+        show_drop = empty and not self._typing_url
+        self.drop.setVisible(show_drop)
+        self.url_edit.setVisible(not show_drop)
+
+    def _paste_url(self, text: str):
+        self._typing_url = False
+        self.url_edit.setText(text)
+        self._update_url_mode()
+
+    def _start_typing_url(self):
+        self._typing_url = True
+        self._update_url_mode()
+        self.url_edit.setFocus()
+
+    def eventFilter(self, obj, ev):
+        if obj is self.url_edit and ev.type() == QEvent.Type.FocusOut and not self.url_edit.text().strip():
+            self._typing_url = False   # 何も打たずに離れたら、貼り付け欄に戻す
+            QTimer.singleShot(0, self._update_url_mode)
+        return super().eventFilter(obj, ev)
 
     def _on_url_changed(self, text: str):
         urls = split_urls(text)
@@ -130,6 +208,10 @@ class MainWindow(QMainWindow):
             self._fetch_timer.start()
         elif not urls:
             self._set_info(None)
+        if not text.strip() and not self.url_edit.hasFocus():
+            self._typing_url = False
+        self._update_url_mode()
+        self._update_download_button()
 
     def _fetch_info(self):
         urls = split_urls(self.url_edit.text())
@@ -142,6 +224,9 @@ class MainWindow(QMainWindow):
         self.info_row.show()
         self.title_label.setText(tr("info.fetching"))
         self.meta_label.setText(url)
+        for c in self.chip_labels:
+            c.hide()
+        self._thumb_src = None
         self.thumb.clear()
         try:
             cookies = self._cookie_opts()
@@ -174,7 +259,12 @@ class MainWindow(QMainWindow):
         dur = format_time(info.duration) if info.duration else "?"
         chat = tr("info.chat_yes") if (info.has_live_chat or info.site == "twitch") else tr("info.chat_no")
         date = f"{info.upload_date[:4]}/{info.upload_date[4:6]}/{info.upload_date[6:]}" if info.upload_date else ""
-        self.meta_label.setText(" ・ ".join(x for x in (info.channel, info.site.capitalize(), dur, date, chat) if x))
+        site = {"youtube": "YouTube", "twitch": "Twitch"}.get(info.site, info.site.capitalize())
+        self.meta_label.setText(" ・ ".join(x for x in (info.channel, site, date) if x))
+        res = f"{info.height}p{int(info.fps) if info.fps and info.fps > 30 else ''}" if info.height else ""
+        for c, text in zip(self.chip_labels, (dur, res, chat)):
+            c.setText(text)
+            c.setVisible(bool(text))
         self.range_bar.set_duration(info.duration)
         # 範囲を動画の長さに収める
         for r in self.rows:
@@ -190,22 +280,28 @@ class MainWindow(QMainWindow):
     def _set_thumb(self, data: bytes):
         pm = QPixmap()
         if data and pm.loadFromData(QByteArray(data)):
-            self.thumb.setPixmap(pm.scaled(self.thumb.size(), Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                                           Qt.TransformationMode.SmoothTransformation))
+            self._thumb_src = pm
+            self._show_thumb()
+
+    def _show_thumb(self):
+        d, _ = theme.current()
+        self.thumb.setPixmap(art.rounded(self._thumb_src, self.thumb.width(), self.thumb.height(), d.radius))
 
     # ================================================================== 2. 範囲
     def _build_range_card(self):
         f, lay = card()
         self.range_card = f
-        lay.addWidget(step_header(2, tr("step.range")))
+        lay.addWidget(step_header(2, tr("step.range"), tr("step.range.hint")))
         self.range_bar = RangeBar()
+        self.range_bar.empty_text = tr("range.empty")
         self.range_bar.rangeChanged.connect(self._on_bar_changed)
         self.range_bar.rangeSelected.connect(self._select_range)
         lay.addWidget(self.range_bar)
         self.rows_lay = QVBoxLayout()
-        self.rows_lay.setSpacing(2)
+        self.rows_lay.setSpacing(4)
         lay.addLayout(self.rows_lay)
         add = QPushButton(tr("range.add"))
+        add.setObjectName("ghost")
         add.clicked.connect(self._add_range)
         h = QHBoxLayout()
         h.addWidget(add)
@@ -268,14 +364,18 @@ class MainWindow(QMainWindow):
         self.range_bar.set_ranges([r.values() for r in self.rows], sel)
         self._select_range(sel)
         self._update_estimate()
+        self._update_download_button()
 
     # ================================================================== 3. 設定とダウンロード
     def _build_settings_card(self):
         s = self.settings
         f, lay = card()
+        lay.addWidget(step_header(3, tr("step.save"), tr("step.save.hint")))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(10)
         row = QHBoxLayout()
-        row.setSpacing(12)
-        row.addWidget(sub_label(tr("quality")))
+        row.setSpacing(16)
         self.preset = QComboBox()
         for key, p in PRESETS.items():
             self.preset.addItem(p.name_en if language() == "en" else p.name_ja, key)
@@ -287,18 +387,22 @@ class MainWindow(QMainWindow):
         self.save_chat.toggled.connect(self._settings_changed)
         row.addWidget(self.save_chat)
         row.addStretch(1)
-        lay.addLayout(row)
+        grid.addWidget(sub_label(tr("quality")), 0, 0)
+        grid.addLayout(row, 0, 1)
         row = QHBoxLayout()
-        row.addWidget(sub_label(tr("output_dir")))
         self.out_edit = QLineEdit(s.output_dir)
         self.out_edit.editingFinished.connect(self._settings_changed)
         browse = QPushButton(tr("browse"))
         browse.clicked.connect(self._browse_dir)
         row.addWidget(self.out_edit, 1)
         row.addWidget(browse)
-        lay.addLayout(row)
+        grid.addWidget(sub_label(tr("output_dir")), 1, 0)
+        grid.addLayout(row, 1, 1)
+        grid.setColumnStretch(1, 1)
+        lay.addLayout(grid)
         row = QHBoxLayout()
         self.adv_toggle = QToolButton()
+        self.adv_toggle.setObjectName("adv")
         self.adv_toggle.setText(tr("advanced"))
         self.adv_toggle.setCheckable(True)
         self.adv_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -307,12 +411,15 @@ class MainWindow(QMainWindow):
         self.adv_toggle.toggled.connect(self._toggle_advanced)
         row.addWidget(self.adv_toggle)
         row.addStretch(1)
-        self.dl_btn = QPushButton(f"③  {tr('step.download')}")
+        self.dl_btn = QPushButton(tr("step.download"))
         self.dl_btn.setObjectName("primary")
         self.dl_btn.setDefault(True)
+        self.dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.dl_btn.clicked.connect(self._download)
-        row.addWidget(self.dl_btn)
+        self._dl_row = row
         lay.addLayout(row)
+        self._dl_full_slot = QVBoxLayout()   # デザインによっては、ボタンを横幅いっぱいにしてここへ置く
+        lay.addLayout(self._dl_full_slot)
         self.adv = self._build_advanced()
         self.adv.hide()
         lay.addWidget(self.adv)
@@ -324,7 +431,7 @@ class MainWindow(QMainWindow):
         g = QGridLayout(w)
         g.setContentsMargins(0, 8, 0, 0)
         g.setHorizontalSpacing(18)
-        g.setVerticalSpacing(4)
+        g.setVerticalSpacing(6)
 
         def combo(items, current):
             c = QComboBox()
@@ -343,6 +450,7 @@ class MainWindow(QMainWindow):
         g.addWidget(self.cfr, 1, 1)
         g.addWidget(sub_label(tr("adv.chat_formats")), 2, 0, 1, 2)
         fr = QHBoxLayout()
+        fr.setSpacing(18)
         self.fmt = {}
         for key, label in (("json", "JSON"), ("csv", "CSV"), ("ass", "ASS"), ("mov", tr("adv.overlay"))):
             cb = QCheckBox(label)
@@ -388,7 +496,51 @@ class MainWindow(QMainWindow):
         self.app_update_cb.setChecked(s.check_app_update)
         self.app_update_cb.toggled.connect(self._settings_changed)
         g.addWidget(self.app_update_cb, 8, 1)
+        self.design = QComboBox()
+        for key in theme.DESIGNS:
+            self.design.addItem(tr(f"design.{key}"), key)
+        self.design.setCurrentIndex(max(0, self.design.findData(s.ui_design)))
+        self.design.currentIndexChanged.connect(self._apply_look)
+        self.mode = QComboBox()
+        for key in theme.MODES:
+            self.mode.addItem(tr(f"mode.{key}"), key)
+        self.mode.setCurrentIndex(max(0, self.mode.findData(s.ui_mode)))
+        self.mode.currentIndexChanged.connect(self._apply_look)
+        g.addWidget(sub_label(tr("adv.design")), 9, 0)
+        g.addWidget(sub_label(tr("adv.mode")), 9, 1)
+        g.addWidget(self.design, 10, 0)
+        g.addWidget(self.mode, 10, 1)
         return w
+
+    def _place_download_button(self, full: bool):
+        self._dl_row.removeWidget(self.dl_btn)
+        self._dl_full_slot.removeWidget(self.dl_btn)
+        if full:
+            self._dl_full_slot.addWidget(self.dl_btn)
+        else:
+            self._dl_row.addWidget(self.dl_btn)
+
+    def _update_download_button(self):
+        """ボタンの文言を、範囲の数に合わせる。URL が無いときは押せない。"""
+        if not hasattr(self, "dl_btn"):
+            return
+        urls = split_urls(self.url_edit.text())
+        self.dl_btn.setEnabled(bool(urls))
+        n = len(self.rows)
+        if len(urls) > 1 or not urls:
+            text = tr("step.download")
+        elif n == 0:
+            text = tr("dl.whole")
+        elif n == 1:
+            text = tr("step.download")
+        else:
+            text = tr("dl.n", n=n)
+        self.dl_btn.setText(text)
+
+    def _apply_look(self, *_):
+        """デザインと明るさをその場で切り替える。"""
+        self._settings_changed()
+        theme.apply(QApplication.instance(), self.settings.ui_design, self.settings.ui_mode)
 
     def _toggle_advanced(self, on: bool):
         self.adv.setVisible(on)
@@ -427,6 +579,9 @@ class MainWindow(QMainWindow):
             s.cookies_file = ""
         s.language = self.lang.currentData()
         s.check_app_update = self.app_update_cb.isChecked()
+        if hasattr(self, "design"):
+            s.ui_design = self.design.currentData()
+            s.ui_mode = self.mode.currentData()
         s.save()
         self._update_estimate()
 
@@ -493,9 +648,17 @@ class MainWindow(QMainWindow):
     # ================================================================== キュー
     def _build_queue_card(self):
         f, lay = card()
-        lay.addWidget(sub_label(tr("queue")))
+        qh = QHBoxLayout()
+        qt = QLabel(tr("queue"))
+        qt.setObjectName("steptitle")
+        self.queue_count = QLabel()
+        self.queue_count.setObjectName("chip")
+        self.queue_count.hide()
+        qh.addWidget(qt)
+        qh.addWidget(self.queue_count)
+        qh.addStretch(1)
+        lay.addLayout(qh)
         self.queue_lay = QVBoxLayout()
-        self.queue_lay.setSpacing(0)
         lay.addLayout(self.queue_lay)
         self.queue_empty = sub_label(tr("q.empty"))
         self.queue_lay.addWidget(self.queue_empty)
@@ -536,7 +699,8 @@ class MainWindow(QMainWindow):
 
     def _enqueue(self, spec: JobSpec, title: str):
         job = self.bridge.add(spec)
-        row = QueueRow(job, title)
+        thumb = self._thumb_src if (self.info and spec.url == self._info_url) else None
+        row = QueueRow(job, title, thumb=thumb)
         row.pauseClicked.connect(self.bridge.pause)
         row.resumeClicked.connect(self.bridge.resume)
         row.cancelClicked.connect(self.bridge.cancel)
@@ -544,6 +708,8 @@ class MainWindow(QMainWindow):
         self.queue_rows[job.id] = row
         self.queue_empty.hide()
         self.queue_lay.insertWidget(0, row)  # 新しいものを上に
+        self.queue_count.setText(tr("q.count", n=len(self.queue_rows)))
+        self.queue_count.show()
         row.refresh()
 
     def _on_job_changed(self, job: Job):
@@ -706,7 +872,7 @@ class MainWindow(QMainWindow):
         if self.settings.window_geometry:
             self.restoreGeometry(QByteArray.fromBase64(self.settings.window_geometry.encode()))
         else:
-            self.resize(860, 900)
+            self.resize(880, 940)
 
 
 def _thumbnail_url(info: VideoInfo) -> str | None:
