@@ -1,6 +1,6 @@
 [project]
 name = "clipdl"
-version = "0.1.0b1"
+version = "0.1.0b2"
 description = "YouTube / Twitch 切り抜き用ダウンローダー"
 requires-python = ">=3.12"
 dependencies = [
