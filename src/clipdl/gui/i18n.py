@@ -50,6 +50,9 @@ STRINGS: dict[str, tuple[str, str]] = {
     "adv.update.apply": ("更新する", "Update"),
     "adv.update.applying": ("更新ファイルを取得して署名を検証中…", "Downloading and verifying the update…"),
     "adv.update.done": ("yt-dlp {version} を検証して保存しました。次回の起動から使います", "yt-dlp {version} was verified and saved. It will be used from the next launch"),
+    "adv.app_update": ("新しい版を確認する", "Check for new versions"),
+    "app_update.available": ("新しい版 {version} があります", "A new version {version} is available"),
+    "app_update.open": ("ダウンロードページを開く", "Open download page"),
     "adv.update.rejected": ("更新版の {name} を使わず、同梱版で動いています", "Using the bundled {name} instead of the update"),
     # キュー
     "q.waiting": ("待機中", "Waiting"),

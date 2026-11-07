@@ -6,8 +6,8 @@ import re
 import urllib.request
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QMainWindow, QPushButton, QScrollArea, QToolButton, QVBoxLayout,
                                QWidget)
@@ -383,6 +383,10 @@ class MainWindow(QMainWindow):
         lr.addWidget(upd)
         lr.addStretch(1)
         g.addLayout(lr, 7, 1)
+        self.app_update_cb = QCheckBox(tr("adv.app_update"))
+        self.app_update_cb.setChecked(s.check_app_update)
+        self.app_update_cb.toggled.connect(self._settings_changed)
+        g.addWidget(self.app_update_cb, 8, 1)
         return w
 
     def _toggle_advanced(self, on: bool):
@@ -420,6 +424,7 @@ class MainWindow(QMainWindow):
         if ck != "__file__":
             s.cookies_file = ""
         s.language = self.lang.currentData()
+        s.check_app_update = self.app_update_cb.isChecked()
         s.save()
         self._update_estimate()
 
@@ -580,6 +585,29 @@ class MainWindow(QMainWindow):
         if REJECTED:
             name, reason = next(iter(REJECTED.items()))
             self.msg.show_error(tr("adv.update.rejected", name=name), reason)
+        self._check_app_update()
+
+    def _check_app_update(self):
+        """clipdl の新しい版があれば下部に知らせる（1 日 1 回まで。失敗しても何も出さない）。"""
+        import copy
+
+        from ..core import app_update
+        if not self.settings.check_app_update:
+            return
+        snap = copy.copy(self.settings)   # 別スレッドでは写しだけを書き換える
+
+        def done(release):
+            s = self.settings
+            s.app_update_checked_at = snap.app_update_checked_at
+            s.app_update_latest = snap.app_update_latest
+            s.app_update_url = snap.app_update_url
+            s.save()
+            # 他のメッセージ（更新版を使えなかった警告など）が出ているときは、そちらを優先する
+            if release and not self.msg.isVisible():
+                self.msg.show_info(tr("app_update.available", version=release.tag), tr("app_update.open"),
+                                   lambda: QDesktopServices.openUrl(QUrl(release.url)))
+
+        run_in_thread(lambda: app_update.check_on_startup(snap), done, lambda *_: None)
 
     # ================================================================== 終了
     def closeEvent(self, ev):

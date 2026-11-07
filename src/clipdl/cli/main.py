@@ -23,10 +23,9 @@ from ..core.models import CfrMode, ChatFormat, CutMode, Progress
 from ..core.naming import TemplateError, validate_template
 from ..core.presets import PRESETS
 from ..core.queue import JobQueue, JobState
-from ..core.settings import Settings
+from ..core.settings import TERMS_VERSION, Settings
 from ..core.timeutil import TimeFormatError, format_time, parse_range
 
-TERMS_VERSION = "1"
 TERMS_TEXT = """\
 【利用規約】
 本ソフトウェアは、権利者の許諾がある、または利用者自身が権利を持つコンテンツのダウンロードにのみ使用できます。
@@ -64,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cookies", default=s.cookies_file, metavar="FILE", help="cookies.txt のパス")
     p.add_argument("--info", action="store_true", help="動画情報だけ表示する")
     p.add_argument("--export-logs", metavar="DIR", help="ログを zip に書き出して終了")
-    p.add_argument("--check-update", action="store_true", help="yt-dlp / yt-dlp-ejs / Deno の版を確認して終了")
+    p.add_argument("--check-update", action="store_true", help="clipdl 本体と yt-dlp / yt-dlp-ejs / Deno の新しい版を確認して終了")
     p.add_argument("--update", action="store_true",
                    help="yt-dlp（と yt-dlp-ejs）を取得・署名検証して記録（次回の起動から反映）")
     p.add_argument("--reset-updates", action="store_true", help="更新版の記録を消して同梱版に戻す")
@@ -226,6 +225,8 @@ def _updates(args) -> int:
         print(f"注意: 更新版の {name} を使わず同梱版で動いています（{reason}）")
     import yt_dlp
     print(f"yt-dlp の読み込み元: {Path(yt_dlp.__file__).parent}")
+    from ..core import app_update
+    print(app_update.check_now().summary())  # clipdl 本体（知らせるだけ。入れ替えはしない）
     for st in updater.check_updates():
         print(st.summary())
     if not args.update:

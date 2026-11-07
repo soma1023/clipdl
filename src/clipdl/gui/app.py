@@ -7,13 +7,12 @@ from PySide6.QtWidgets import QApplication, QDialog
 
 from .. import __version__
 from ..core.logging_setup import setup_logging
-from ..core.settings import Settings
+from ..core.settings import TERMS_VERSION, Settings
 from . import theme
 from .i18n import set_language
 from .main_window import MainWindow
 from .widgets import TermsDialog
 
-TERMS_VERSION = "1"  # CLI と同じ（規約の文面を変えたら上げる）
 
 
 def main(argv: list[str] | None = None) -> int:

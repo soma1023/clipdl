@@ -14,6 +14,8 @@ from .paths import config_dir
 log = logging.getLogger(__name__)
 
 DEFAULT_TEMPLATE = "{date}_{channel}_{title}"
+# 利用規約の版（TERMS.md の「規約の版」と合わせる。上げると次回の起動時にあらためて同意を求める）
+TERMS_VERSION = "2"
 
 
 @dataclass
@@ -34,6 +36,10 @@ class Settings:
     overlay_crop: bool = True        # チャット欄の幅だけ切り出す（縦流れのときだけ有効）
     overlay_fps: str = "30"          # "30" / "60" / ""（クリップ本体に合わせる）
     terms_accepted_version: str = ""
+    check_app_update: bool = True    # 起動時に clipdl の新しい版を確認する（1 日 1 回まで）
+    app_update_checked_at: float = 0.0   # 前回確認した時刻（UNIX 時刻）
+    app_update_latest: str = ""      # 前回確認したときの最新の版（タグ名）
+    app_update_url: str = ""         # そのリリースページ
     window_geometry: str = ""        # GUI のウィンドウ位置（Qt の saveGeometry を base64 で保存）
 
     @classmethod
