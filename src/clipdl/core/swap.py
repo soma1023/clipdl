@@ -9,6 +9,7 @@
 結果は update-result.json に書く（古い版が起動したときに画面下部へ表示する）。
 
 1 つ前の版（clipdl.old）は残す。次の更新のときに、clipdl のフォルダであることを確かめてから消す。
+（使用中で消しきれなかった控えは clipdl.old-<数字> に退け、その次の更新で消す。控えは増えていかない）
 """
 from __future__ import annotations
 
@@ -136,6 +137,18 @@ def _remove_dir(d: Path) -> None:
         d.rename(d.with_name(f"{d.name}-{int(time.time())}"))
 
 
+def _sweep_set_aside(d: Path) -> None:
+    """_remove_dir が脇に退けた「<名前>-<数字>」のフォルダを消す（控えが増えていかないように）。
+
+    名前が完全に一致するものだけを対象にする。消せないものは、そのまま次の更新に回す。
+    """
+    for p in d.parent.glob(f"{d.name}-*"):
+        if p.is_dir() and p.name[len(d.name) + 1:].isdigit():
+            shutil.rmtree(p, ignore_errors=True)
+            if p.exists():
+                log.info("前の版の控えの残りを消せませんでした（次の更新で消します）: %s", p)
+
+
 def _write_result(plan: Plan, status: str, message: str) -> None:
     data = {"status": status, "message": message, "old_version": plan.old_version,
             "new_version": plan.new_version, "time": time.time()}
@@ -177,6 +190,7 @@ def run(plan: Plan, ops: Ops | None = None) -> str:
         _write_result(plan, "not_started", "新しい版のファイルがそろっていないため、更新しませんでした。")
         ops.launch(old_exe)
         return "not_started"
+    _sweep_set_aside(plan.backup_dir)
     try:
         _remove_dir(plan.backup_dir)
     except (OSError, RuntimeError) as e:

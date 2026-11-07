@@ -372,6 +372,48 @@ def test_swap_replaces_older_backup_but_never_deletes_foreign_folder(tmp_path):
     assert (plan2.backup_dir / "notes.txt").exists() and (inst2 / "clipdl.exe").read_bytes() == b"old-exe"
 
 
+def _clipdl_dirs(parent: Path) -> list[str]:
+    return sorted(d.name for d in parent.iterdir() if d.is_dir() and d.name.startswith("clipdl"))
+
+
+def test_repeated_updates_keep_only_one_backup(tmp_path):
+    inst = _install(tmp_path)
+    for i in range(3):
+        plan = _plan(tmp_path, inst)
+        (plan.staging_dir / "VERSION").write_text(f"v{i}")
+        assert swap.run(plan, FakeOps(plan)) == "ok"
+    assert _clipdl_dirs(inst.parent) == ["clipdl", "clipdl.old"]
+    assert (plan.backup_dir / "VERSION").read_text() == "v1"         # 直前の版だけ
+    assert (inst / "VERSION").read_text() == "v2"
+
+
+def test_backups_set_aside_earlier_are_swept_on_next_update(tmp_path):
+    inst = _install(tmp_path)
+    plan = _plan(tmp_path, inst)
+    for name in ("clipdl.old-1794000000", "clipdl.old-1794000001"):   # 使用中で消しきれず退けた控え
+        (inst.parent / name / "_internal").mkdir(parents=True)
+    keep = ["clipdl.old-mine", "clipdl.old-1x"]                          # 名前が違うものには触らない
+    for name in keep:
+        (inst.parent / name).mkdir()
+    assert swap.run(plan, FakeOps(plan)) == "ok"
+    assert _clipdl_dirs(inst.parent) == sorted(["clipdl", "clipdl.old", *keep])
+
+
+def test_backup_that_cannot_be_fully_removed_is_set_aside(tmp_path, monkeypatch):
+    inst = _install(tmp_path)
+    plan = _plan(tmp_path, inst)
+    (plan.backup_dir / "_internal").mkdir(parents=True)
+    (plan.backup_dir / "clipdl.exe").write_bytes(b"older")
+    monkeypatch.setattr(swap.shutil, "rmtree", lambda *a, **k: None)   # 使用中で消せない状態
+    assert swap.run(plan, FakeOps(plan)) == "ok"
+    aside = [n for n in _clipdl_dirs(inst.parent) if n.startswith("clipdl.old-")]
+    assert len(aside) == 1 and (plan.backup_dir / "clipdl.exe").read_bytes() == b"old-exe"
+    monkeypatch.undo()
+    plan2 = _plan(tmp_path, inst)
+    assert swap.run(plan2, FakeOps(plan2)) == "ok"                     # 次の更新で消える
+    assert _clipdl_dirs(inst.parent) == ["clipdl", "clipdl.old"]
+
+
 def test_plan_roundtrip(tmp_path):
     plan = _plan(tmp_path, _install(tmp_path))
     p = tmp_path / "plan.json"
