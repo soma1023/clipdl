@@ -2,6 +2,11 @@
 
 使い方:
   .venv\\Scripts\\python.exe packaging\\sign_release.py [秘密鍵のパス]
+  .venv\\Scripts\\python.exe packaging\\sign_release.py --save-passphrase    パスフレーズを 1 回だけ入力して保存
+  .venv\\Scripts\\python.exe packaging\\sign_release.py --forget-passphrase  保存したパスフレーズを消す
+
+パスフレーズを保存しておくと（Windows の DPAPI で暗号化。この PC のこのユーザーでしか読めない）、
+次からは入力なしで署名できる。保存していなければ、これまでどおり入力欄で尋ねる。
 
 作るもの（build/release/ に置く。zip・.sha256 と一緒にリリースに添付する）:
   clipdl-<版>-win64.update.json       更新情報（版・zip の名前・サイズ・SHA-256・鍵 ID）
@@ -18,6 +23,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import dpapi  # noqa: E402
 
 from Cryptodome.PublicKey import ECC  # noqa: E402
 
@@ -30,17 +38,47 @@ DEFAULT_KEY = Path.home() / "clipdl-keys" / "clipdl-release-ed25519.pem"
 PASSPHRASE_ENV = "CLIPDL_SIGNING_PASSPHRASE"   # 自動テスト用（ふだんは入力欄で尋ねる）
 
 
+def _read_key(key_path: Path, passphrase: str):
+    return ECC.import_key(key_path.read_text("ascii"), passphrase=passphrase)
+
+
+def save_passphrase(key_path: Path) -> int:
+    """パスフレーズを入力してもらい、秘密鍵を開けることを確かめてから DPAPI で保存する。"""
+    passphrase = getpass.getpass(f"{key_path.name} のパスフレーズ（保存します）: ")
+    try:
+        _read_key(key_path, passphrase)
+    except (OSError, ValueError) as e:
+        print(f"秘密鍵を開けません（パスフレーズの間違いなど）。保存しませんでした: {e}", file=sys.stderr)
+        return 1
+    path = dpapi.save(passphrase)
+    if dpapi.load() != passphrase:
+        print("保存したパスフレーズを読み戻せませんでした。", file=sys.stderr)
+        return 1
+    print(f"保存しました: {path}")
+    print("次からは入力なしで署名できます。やめるときは --forget-passphrase を付けて実行してください。")
+    return 0
+
+
 def main() -> int:
-    key_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_KEY
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    key_path = Path(args[0]) if args else DEFAULT_KEY
+    if "--save-passphrase" in sys.argv:
+        return save_passphrase(key_path)
+    if "--forget-passphrase" in sys.argv:
+        print("消しました。" if dpapi.forget() else "保存されたパスフレーズはありません。")
+        return 0
     version = os.environ.get("CLIPDL_SIGN_VERSION", __version__)
     zip_name, manifest_name, sig_name = asset_names(version)
     zip_path = RELEASE / zip_name
     if not zip_path.is_file():
         print(f"{zip_path} がありません。先に packaging\\build.py を実行してください。", file=sys.stderr)
         return 1
-    passphrase = os.environ.get(PASSPHRASE_ENV) or getpass.getpass(f"{key_path.name} のパスフレーズ: ")
+    saved = dpapi.load()
+    if saved and not os.environ.get(PASSPHRASE_ENV):
+        print(f"保存したパスフレーズを使います（{dpapi.STORE}）")
+    passphrase = os.environ.get(PASSPHRASE_ENV) or saved or getpass.getpass(f"{key_path.name} のパスフレーズ: ")
     try:
-        key = ECC.import_key(key_path.read_text("ascii"), passphrase=passphrase)
+        key = _read_key(key_path, passphrase)
     except (OSError, ValueError) as e:
         print(f"秘密鍵を読めません（パスフレーズの間違いなど）: {e}", file=sys.stderr)
         return 1

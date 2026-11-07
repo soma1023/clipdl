@@ -69,11 +69,40 @@ def test_no_break_before_closing_punctuation_or_small_kana():
     assert parts == ["「えっ」、", "ちょっ", "と！？", "ｗ"]
 
 
-def test_spaces_keep_width_and_space_only_fragments_untouched():
-    s = ts.make_breakable("a  b")
-    assert s == "a" + ts.SPACE + "b"            # 連続する空白は 1 つ分
+def _gap_units(gap: str) -> float:
+    """単語と単語の間の文字列が、chatrender で空白何個分の幅になるか。
+
+    chatrender は空白（区切り）で分けた空でないかたまりごとに単語の間隔（1/4）を足す。
+    直前の単語の分の 1/4 ＋ 間にある幅 0 のかたまりの数 × 1/4。
+    """
+    parts = [p for p in gap.split(ts.BREAK) if p]
+    assert all(set(p) == {ts.ZW} for p in parts)   # 間にあるのは幅 0 の文字だけ
+    return ts.WORD_SPACE_SCALE * (len(parts) + 1)
+
+
+@pytest.mark.parametrize("text,word_a,word_b,units", [
+    ("好きじゃないのか w", "か", "w", 1),        # 半角の空白 1 つ
+    ("あああ　w", "あ", "w", 4),                 # 全角の空白は日本語 1 文字分（半角 4 つ分）
+    ("hello  wxyz", "o", "w", 2),              # 連続する空白もまとめない
+    ("abc 　def", "c", "d", 5),                # 半角＋全角
+])
+def test_original_spaces_keep_count_and_width(text, word_a, word_b, units):
+    s = ts.make_breakable(text)
+    gap = s[s.rindex(word_a) + 1: s.index(word_b, s.rindex(word_a))]
+    assert _gap_units(gap) == units
+    assert ts.BREAK in gap                     # 空白の位置では折り返せる
+
+
+def test_no_space_is_added_where_the_original_has_none():
+    # YouTube は「好きじゃないのか」「w」のように空白なしで分けて送ることがある（元の文には空白が無い）
+    assert _visible(ts.make_breakable("のか")) == "のか"
+    assert ts.make_breakable("w") == "w"
+
+
+def test_space_only_fragments_untouched_and_lead_pad():
     assert ts.make_breakable(" ") == " "         # エモートの間の空白はそのまま
     assert ts.make_breakable("あ", lead=True).startswith(ts.PAD)
+    assert _gap_units(ts.PAD) == 1.0             # 名前の後ろの間隔 1/4 ＋ PAD ＝ 空白 1 つ分
 
 
 def test_build_adds_breaks_and_lead_pad():

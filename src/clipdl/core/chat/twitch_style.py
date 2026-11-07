@@ -105,22 +105,29 @@ def stable_color(key: str) -> str:
 # 空白の無い日本語の文は 1 かたまりなので、名前の横に入りきらないと文全体が次の行に落ちる。
 # そこで、日本語の文字の後ろに「区切り」（chatrender が空白とみなす U+200A）を入れて折り返せるようにする。
 # chatrender は区切りごとに単語の間隔を空けるため、間隔を 1/4 に縮め（--scale-word-space 0.25）、
-# もともとの空白（英単語の間・名前と本文の間）は区切りを 4 つ並べて元の幅に戻す。
+# もともとの空白（英単語の間・名前と本文の間）は、幅 0 の文字のかたまりを並べて元の幅に戻す（下の説明）。
 # 英単語・URL・エモート名（空白を含まない英数字のかたまり）は途中で切らない。
 
-BREAK = " "
+BREAK = "\u200a"
 WORD_SPACE_SCALE = 0.25
 # chatrender は空のかたまりを飛ばすため、区切りを並べても幅は戻らない。かたまりは 1 つごとに単語の間隔
 # （1/4）が付くので、もともとの空白は「幅 0 の文字（U+200B。chatrender は空白とみなさない）だけのかたまり」を
 # 3 つ並べて、直前の単語の間隔 1/4 ＋ 3/4 ＝ 元の空白 1 つ分の幅に戻す
-ZW = "​"
+ZW = "\u200b"
 PAD = (ZW + BREAK) * (round(1 / WORD_SPACE_SCALE) - 1)
 SPACE = BREAK + PAD
 # 行頭に来てはいけない文字（この前では折り返さない）
 _NO_BREAK_BEFORE = set("、。，．・：；？！ー～〜）」』】〕〉》｝］)]}!?.,:;ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ々")
 # 行末に来てはいけない文字（この後では折り返さない）
 _NO_BREAK_AFTER = set("（「『【〔〈《｛［([{")
-_SPACES = set(" \t　 ")
+_SPACES = set(" \t\u3000\u00a0")
+_SPACE_UNITS = {"\u3000": 4}   # 全角の空白は、半角の空白のおよそ 4 つ分
+
+
+def spacing(units: int) -> str:
+    """空白 units 個分の幅（直前の単語の間隔 1/4 を含む）。区切りを 1 つ含むので、そこで折り返せる。"""
+    chunks = max(0, round(units / WORD_SPACE_SCALE) - 1)
+    return BREAK + (ZW + BREAK) * chunks
 
 
 def _is_cjk(ch: str) -> bool:
@@ -139,9 +146,13 @@ def make_breakable(text: str, lead: bool = False) -> str:
     while i < n:
         ch = text[i]
         if ch in _SPACES:
-            while i < n and text[i] in _SPACES:   # 連続する空白は 1 つにまとめる
+            # 元の空白は数も幅もそのまま残す（連続する空白もまとめない）。
+            # 半角の空白は空白 1 つ分、全角の空白は空白 4 つ分（日本語 1 文字分）の幅にする
+            units = 0
+            while i < n and text[i] in _SPACES:
+                units += _SPACE_UNITS.get(text[i], 1)
                 i += 1
-            out.append(SPACE)
+            out.append(spacing(units))
             continue
         out.append(ch)
         nxt = text[i + 1] if i + 1 < n else ""

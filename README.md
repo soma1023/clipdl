@@ -310,6 +310,39 @@ cd clipdl
 - 配布物の作り方・SHA-256・VirusTotal での確認は [docs/RELEASE.md](docs/RELEASE.md)
 - 計画と設計の経緯は [PLAN.md](PLAN.md)
 
+### リリースの署名（ワンクリック更新用）
+
+リリースの zip には、Ed25519 の秘密鍵で署名した更新情報を添付します（[docs/RELEASE.md](docs/RELEASE.md)）。
+
+| もの | 場所 |
+|---|---|
+| 秘密鍵（パスフレーズで暗号化） | `%USERPROFILE%\clipdl-keys\clipdl-release-ed25519.pem`（OneDrive・リポジトリの外） |
+| 公開鍵（アプリに埋め込む） | `src/clipdl/core/keys/clipdl_release_<鍵ID>.pub` |
+| 保存したパスフレーズ（任意） | `%LOCALAPPDATA%\clipdl-signing\passphrase.dpapi` |
+
+```bash
+.venv\Scripts\python.exe packaging\keygen.py                         # 鍵を作る（最初の 1 回だけ）
+.venv\Scripts\python.exe packaging\sign_release.py --save-passphrase   # パスフレーズを保存（1 回だけ・自分で入力）
+.venv\Scripts\python.exe packaging\sign_release.py                     # 署名（保存していれば入力なし）
+.venv\Scripts\python.exe packaging\sign_release.py --forget-passphrase # 保存したパスフレーズを消す
+```
+
+- パスフレーズは Windows の DPAPI で暗号化して保存します。**この PC のこのユーザーでしか元に戻せません**
+  （ファイルを別の PC や別のユーザーにコピーしても読めません）。そのかわり、このユーザーとしてログインできる人は
+  署名できるようになります。PC を手放す・共有するときは `--forget-passphrase` で消してください。
+
+#### 秘密鍵のバックアップ
+
+秘密鍵をなくすと、それ以降の版には署名できず、利用者に一度だけ手動で入れ替えてもらうことになります。
+
+1. `clipdl-release-ed25519.pem` を **USB メモリなどオフラインの場所に 2 つ**コピーする
+   （パスフレーズで暗号化されているので、ファイルだけを盗まれても使えません）
+2. **パスフレーズはパスワードマネージャーに保存**する（ファイルと同じ場所には置かない）
+3. 年に 1 回くらい、バックアップから鍵を開けることを確かめる:
+   `.venv\Scripts\python.exe packaging\sign_release.py <バックアップの .pem のパス> --save-passphrase`
+   （開ければ「保存しました」と出ます。確かめたあとは、ふだん使う鍵で `--save-passphrase` をやり直す）
+4. `passphrase.dpapi` はこの PC 専用なので、バックアップしても別の PC では使えません（バックアップ不要）
+
 テスト用の環境変数（値の前後の空白は無視します）:
 
 | 環境変数 | 内容 |

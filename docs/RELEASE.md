@@ -33,7 +33,8 @@ cd clipdl
 .venv\Scripts\python.exe packaging\sign_release.py
 ```
 
-秘密鍵のパスフレーズを尋ねられます。次の 2 つが `build/release/` にできます（どちらもリリースに添付する）。
+秘密鍵のパスフレーズを尋ねられます（`--save-passphrase` で保存していれば入力なし。README の開発者向けを参照）。
+次の 2 つが `build/release/` にできます（どちらもリリースに添付する）。
 
 - `clipdl-<版>-win64.update.json` … 更新情報（版・zip の名前・サイズ・SHA-256・鍵 ID）
 - `clipdl-<版>-win64.update.json.sig` … その Ed25519 署名
