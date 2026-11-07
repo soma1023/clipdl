@@ -33,6 +33,23 @@ class _Task(QRunnable):
         self.signals.done.emit(result)
 
 
+class ProgressRelay(QObject):
+    """別スレッドの進捗を GUI スレッドへ渡す（0.2 秒に 1 回まで。段階が変わったときはすぐ渡す）。"""
+    progress = Signal(str, object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._last = (None, 0.0)
+
+    def emit_throttled(self, stage: str, ratio) -> None:
+        import time
+        now = time.monotonic()
+        last_stage, last_t = self._last
+        if stage != last_stage or now - last_t >= 0.2 or ratio == 1.0:
+            self._last = (stage, now)
+            self.progress.emit(stage, ratio)
+
+
 _pool_tasks: set = set()  # シグナルの受け手が先に消えないよう、終わるまで参照を持つ
 
 

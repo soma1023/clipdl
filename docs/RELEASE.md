@@ -22,9 +22,35 @@ cd clipdl
 
 出力:
 
-- `build/dist/clipdl/` … 配布フォルダ（`clipdl.exe` = GUI、`clipdl-cli.exe` = コマンドライン）
+- `build/dist/clipdl/` … 配布フォルダ（`clipdl.exe` = GUI、`clipdl-cli.exe` = コマンドライン、
+  `clipdl-updater.exe` = ワンクリック更新の入れ替え用、`VERSION` = 版番号）
 - `build/release/clipdl-<版>-win64.zip` … 配布する zip
 - `build/release/clipdl-<版>-win64.zip.sha256` … zip の SHA-256（リリースページに載せる）
+
+### 署名（ワンクリック更新用）
+
+```bash
+.venv\Scripts\python.exe packaging\sign_release.py
+```
+
+秘密鍵のパスフレーズを尋ねられます。次の 2 つが `build/release/` にできます（どちらもリリースに添付する）。
+
+- `clipdl-<版>-win64.update.json` … 更新情報（版・zip の名前・サイズ・SHA-256・鍵 ID）
+- `clipdl-<版>-win64.update.json.sig` … その Ed25519 署名
+
+署名のあと、アプリに埋め込んだ公開鍵で検証し直します（通らなければ失敗）。
+**この 2 つを添付し忘れると、その版へはワンクリック更新できません**（ページを開く案内になります）。
+
+### 署名用の鍵
+
+- 秘密鍵: `%USERPROFILE%\clipdl-keys\clipdl-release-ed25519.pem`（パスフレーズで暗号化。OneDrive・リポジトリの外）
+- 公開鍵: `src/clipdl/core/keys/clipdl_release_<鍵ID>.pub`（アプリに埋め込む）
+- 最初の 1 回だけ `.venv\Scripts\python.exe packaging\keygen.py` で作る
+- バックアップ: 暗号化された `.pem` を USB メモリなどオフラインの場所に 2 つ。パスフレーズはパスワードマネージャーへ
+  （ファイルと同じ場所には置かない）
+- 鍵を替えるとき: 新しい公開鍵を**古い鍵と並べて**埋め込んだ版を、古い鍵で署名して出す。
+  利用者がその版に更新したあとで、新しい鍵での署名に切り替える
+- 鍵をなくしたとき: 以降の版には署名できない。新しい鍵を埋め込んだ版を出し、利用者には一度だけ手動で入れ替えてもらう
 
 ## 3. 配布前の確認
 
@@ -60,6 +86,13 @@ cd clipdl
 ## 5. リリースページに載せるもの
 
 - `clipdl-<版>-win64.zip` と `clipdl-<版>-win64.zip.sha256`
+- `clipdl-<版>-win64.update.json` と `clipdl-<版>-win64.update.json.sig`（ワンクリック更新用）
+
+```bash
+gh release create v<版> build\release\clipdl-<版>-win64.zip build\release\clipdl-<版>-win64.zip.sha256 ^
+  build\release\clipdl-<版>-win64.update.json build\release\clipdl-<版>-win64.update.json.sig ^
+  --target main --prerelease --title "clipdl <版>（ベータ版）" --notes-file <リリースノート>
+```
 - SHA-256 の値（本文にも書く）と、確かめ方（`Get-FileHash ... -Algorithm SHA256`）
 - VirusTotal の結果ページの URL
 - 変更点、既知の問題、SmartScreen の警告が出たときの対処（README の「インストール」へのリンク）

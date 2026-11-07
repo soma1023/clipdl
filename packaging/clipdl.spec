@@ -53,3 +53,12 @@ cli_exe = EXE(PYZ(cli_a.pure), cli_a.scripts, [], exclude_binaries=True, name="c
 coll = COLLECT(gui_exe, gui_a.binaries, gui_a.datas,
                cli_exe, cli_a.binaries, cli_a.datas,
                upx=False, name="clipdl")
+
+# 入れ替え用プログラム（clipdl-updater.exe）: 標準ライブラリだけの 1 ファイル exe。
+# 実行中は自分のファイルが使用中になるので、アプリが一時フォルダにコピーしてから起動する。
+# build.py が build/dist/clipdl-updater.exe を配布フォルダにコピーする。
+upd_a = Analysis([str(Path(SPECPATH) / "updater_entry.py")], pathex=[str(SRC)], datas=[], hiddenimports=[],
+                 excludes=["tkinter", "PySide6", "yt_dlp", "yt_dlp_ejs", "Cryptodome", "platformdirs", "pytest",
+                           "PyInstaller", "setuptools", "pip"])
+upd_exe = EXE(PYZ(upd_a.pure), upd_a.scripts, upd_a.binaries, upd_a.datas, name="clipdl-updater",
+              console=False, upx=False, version=None)

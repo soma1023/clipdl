@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,6 +70,14 @@ def activate_updates(root: Path | None = None, components: dict[str, str] | None
         entry = manifest.get(name)
         if not entry:
             continue
+        bundled = bundled_version(module)
+        if bundled and not _version_newer(str(entry.get("version", "")), bundled):
+            # アプリの更新で同梱版のほうが新しく（または同じに）なった。警告は出さずに同梱版を使う
+            log.info("同梱版の %s %s が更新版 %s より新しい（または同じ）ため、同梱版を使います",
+                     name, bundled, entry.get("version"))
+            if name == "yt-dlp":   # ejs は yt-dlp と組。yt-dlp を同梱版にするなら ejs も同梱版にする
+                manifest = {k: v for k, v in manifest.items() if k != "yt-dlp-ejs"}
+            continue
         reason = _check(root, entry, module)
         if name == "yt-dlp-ejs" and "yt-dlp" in manifest and "yt-dlp" not in activated and not reason:
             # yt-dlp-ejs は yt-dlp の版と組で使う。yt-dlp の更新版を使えないなら ejs も使わない
@@ -83,6 +92,33 @@ def activate_updates(root: Path | None = None, components: dict[str, str] | None
         log.info("更新版の %s %s を使います（SHA-256 一致）", name, entry.get("version"))
     ACTIVE.update(activated)
     return activated
+
+
+_VERSION_LINE = re.compile(r"""^__version__\s*=\s*(?:version\s*=\s*)?['"]([^'"]+)['"]""", re.MULTILINE)
+
+
+def bundled_version(module: str) -> str | None:
+    """sys.path のフォルダにある同梱版（zip の更新版は除く）の版を、import せずに読む。"""
+    for entry in sys.path:
+        d = Path(entry) / module
+        if not entry or not d.is_dir():
+            continue
+        for name in ("version.py", "_version.py"):
+            f = d / name
+            if f.is_file():
+                m = _VERSION_LINE.search(f.read_text("utf-8", errors="replace"))
+                if m:
+                    return m.group(1)
+    return None
+
+
+def _version_tuple(v: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in re.findall(r"\d+", v))
+
+
+def _version_newer(a: str, b: str) -> bool:
+    """a が b より新しいか（yt-dlp の 2026.10.26 / 2026.11.02.1、ejs の 0.8.0 のような数字の並びを比べる）。"""
+    return _version_tuple(a) > _version_tuple(b)
 
 
 def _check(root: Path, entry: dict, module: str) -> str | None:

@@ -1,6 +1,7 @@
 """GUI の起動: python -m clipdl.gui"""
 from __future__ import annotations
 
+import logging
 import sys
 
 from PySide6.QtWidgets import QApplication, QDialog
@@ -23,6 +24,13 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings.load()
     set_language(settings.language)
     theme.apply(app)
+    # 更新直後なら「起動できた」印をすぐ書く（利用規約の再同意を待つと、入れ替え用プログラムが失敗と判断するため）
+    from ..core import selfupdate
+    try:
+        after_update = selfupdate.after_startup()
+    except Exception:  # noqa: BLE001 — 更新の後片付けで起動を止めない
+        logging.getLogger(__name__).exception("更新の結果を確認できませんでした")
+        after_update = None
     if settings.terms_accepted_version != TERMS_VERSION:
         if TermsDialog().exec() != QDialog.DialogCode.Accepted:
             return 0
@@ -31,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     win = MainWindow(settings)
     win.restore_geometry()
     win.show()
-    win.show_startup_notices()
+    win.show_startup_notices(after_update)
     return app.exec()
 
 

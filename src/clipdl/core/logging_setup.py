@@ -71,7 +71,8 @@ def export_logs(dest_dir: Path) -> Path:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("system.txt", mask(
             f"clipdl {__version__}\nPython {platform.python_version()}\n{platform.platform()}\n"))
-        for p in sorted(log_dir().glob(LOG_NAME + "*")):
+        files = sorted(log_dir().glob(LOG_NAME + "*")) + sorted(log_dir().glob("clipdl-updater.log*"))
+        for p in files:  # 本体のログと、入れ替え用プログラムのログ
             try:
                 zf.writestr(p.name + ".txt", mask(p.read_text("utf-8", errors="replace")))
             except OSError:

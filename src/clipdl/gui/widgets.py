@@ -326,11 +326,11 @@ class MessageBar(QFrame):
         row.addWidget(self.icon)
         row.addWidget(self.text, 1)
         row.addWidget(self.detail_btn)
-        self.action_btn = QPushButton()   # 「更新する」など、メッセージに対する操作（必要なときだけ表示）
-        self.action_btn.hide()
-        self.action_btn.clicked.connect(self._run_action)
-        self._action = None
-        row.addWidget(self.action_btn)
+        # 「更新する」など、メッセージに対する操作のボタン（必要なときだけ。複数並べられる）
+        self._actions_row = QHBoxLayout()
+        self._actions_row.setSpacing(6)
+        self.action_buttons: list[QPushButton] = []
+        row.addLayout(self._actions_row)
         row.addWidget(close)
         v.addLayout(row)
         self.detail = QPlainTextEdit()
@@ -349,29 +349,42 @@ class MessageBar(QFrame):
         self.detail.hide()
         self.detail_btn.setText(tr("err.details"))
         self.detail_btn.setVisible(bool(raw))
-        self._set_action(None, None)
+        self._set_actions([])
         self.show()
 
-    def show_info(self, message: str, action_text: str | None = None, action=None) -> None:
+    def show_info(self, message: str, action_text: str | None = None, action=None,
+                  actions: list[tuple[str, object]] | None = None) -> None:
         self._set_kind(False)
         self.icon.setText("ℹ")
         self.text.setText(message)
         self.text.setToolTip(message)
         self.detail.hide()
         self.detail_btn.hide()
-        self._set_action(action_text, action)
+        acts = list(actions or [])
+        if action_text and action:
+            acts.insert(0, (action_text, action))
+        self._set_actions(acts)
         self.show()
 
-    def _set_action(self, text, fn):
-        self._action = fn
-        self.action_btn.setText(text or "")
-        self.action_btn.setVisible(bool(text and fn))
+    @property
+    def action_btn(self) -> QPushButton | None:
+        """先頭のボタン（無ければ None）。"""
+        return self.action_buttons[0] if self.action_buttons else None
 
-    def _run_action(self):
-        fn, self._action = self._action, None
-        self.action_btn.hide()
-        if fn:
-            fn()
+    def _set_actions(self, acts) -> None:
+        for b in self.action_buttons:
+            self._actions_row.removeWidget(b)
+            b.deleteLater()
+        self.action_buttons = []
+        for text, fn in acts:
+            b = QPushButton(text)
+            b.clicked.connect(lambda _=False, f=fn: self._run_action(f))
+            self._actions_row.addWidget(b)
+            self.action_buttons.append(b)
+
+    def _run_action(self, fn):
+        self._set_actions([])   # 二度押しを防ぐ（操作の結果で次のメッセージを出す）
+        fn()
 
     def _set_kind(self, error: bool):
         light = not theme.is_dark()

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QPixmap
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QMainWindow, QPushButton, QScrollArea, QToolButton, QVBoxLayout,
                                QWidget)
 
@@ -579,12 +579,26 @@ class MainWindow(QMainWindow):
             tr("adv.update.done", version=res.ytdlp_version)),
             lambda err: self.msg.show_error(err.message(language()), err.raw))
 
-    def show_startup_notices(self):
-        """起動時に更新版を使えなかったときは、理由を 1 行で知らせる。"""
+    def show_startup_notices(self, after_update=None):
+        """起動時のお知らせ。優先順: 更新の結果 → 更新版を使えなかった警告 → 準備済みの新しい版 → 新しい版の確認。"""
+        from ..core import selfupdate
         from ..core.bootstrap import REJECTED
-        if REJECTED:
+        if after_update is not None:
+            if after_update.status == "ok":
+                self.msg.show_info(after_update.message)
+            else:
+                self.msg.show_error(tr("selfupdate.rolled_back"), after_update.message)
+        elif REJECTED:
             name, reason = next(iter(REJECTED.items()))
             self.msg.show_error(tr("adv.update.rejected", name=name), reason)
+        else:
+            try:
+                prepared = selfupdate.find_prepared()
+            except Exception:  # noqa: BLE001
+                prepared = None
+            if prepared is not None:
+                self._show_update_ready(prepared)
+                return
         self._check_app_update()
 
     def _check_app_update(self):
@@ -604,10 +618,80 @@ class MainWindow(QMainWindow):
             s.save()
             # 他のメッセージ（更新版を使えなかった警告など）が出ているときは、そちらを優先する
             if release and not self.msg.isVisible():
-                self.msg.show_info(tr("app_update.available", version=release.tag), tr("app_update.open"),
-                                   lambda: QDesktopServices.openUrl(QUrl(release.url)))
+                self._show_update_available(release)
 
         run_in_thread(lambda: app_update.check_on_startup(snap), done, lambda *_: None)
+
+    # ------------------------------------------------------------------ ワンクリック更新
+    def _open_release(self, release):
+        QDesktopServices.openUrl(QUrl(release.url))
+
+    def _show_update_available(self, release):
+        from ..core import selfupdate
+        actions = []
+        if selfupdate.unsupported_reason() is None:
+            actions.append((tr("selfupdate.update"), lambda: self._start_self_update(release)))
+        actions.append((tr("app_update.open"), lambda: self._open_release(release)))
+        self.msg.show_info(tr("app_update.available", version=release.tag), actions=actions)
+
+    def _start_self_update(self, release):
+        """新しい版をダウンロード・検証して、アプリの隣に展開する（別スレッド）。"""
+        from ..core import selfupdate
+        from .workers import ProgressRelay
+        relay = ProgressRelay(self)
+        labels = {"verify": tr("selfupdate.verifying"), "download": tr("selfupdate.downloading"),
+                  "extract": tr("selfupdate.extracting")}
+
+        def on_progress(stage, ratio):
+            text = labels.get(stage, stage)
+            if ratio is not None:
+                text += f"  {ratio * 100:.0f}%"
+            self.msg.show_info(text)
+
+        relay.progress.connect(on_progress)
+        self.msg.show_info(labels["verify"])
+
+        def work():
+            try:
+                return selfupdate.prepare(release.tag, progress=relay.emit_throttled)
+            except selfupdate.SelfUpdateError as e:
+                return e
+            except Exception as e:  # noqa: BLE001 — 通信エラーなども「ページを開く」案内に戻す
+                logging.getLogger(__name__).exception("自動更新の準備に失敗")
+                return selfupdate.SelfUpdateError(f"{type(e).__name__}: {e}")
+
+        def done(res):
+            relay.deleteLater()
+            if isinstance(res, selfupdate.SelfUpdateError):
+                logging.getLogger(__name__).warning("自動更新できませんでした: %s", res)
+                self.msg.show_info(tr("selfupdate.failed", reason=str(res)),
+                                   actions=[(tr("app_update.open"), lambda: self._open_release(release))])
+            else:
+                self._show_update_ready(res)
+
+        run_in_thread(work, done, lambda err: done(selfupdate.SelfUpdateError(err.message(language()))))
+
+    def _show_update_ready(self, prepared):
+        self.msg.show_info(tr("selfupdate.ready", version=prepared.version),
+                           actions=[(tr("selfupdate.restart"), lambda: self._restart_to_update(prepared)),
+                                    (tr("selfupdate.later"), self.msg.hide)])
+
+    def _restart_to_update(self, prepared):
+        from ..core import selfupdate
+        busy = any(r.job.state in (JobState.WAITING, JobState.RUNNING) for r in self.queue_rows.values())
+        if busy:
+            self.msg.show_info(tr("selfupdate.busy"),
+                               actions=[(tr("selfupdate.restart"), lambda: self._restart_to_update(prepared)),
+                                        (tr("selfupdate.later"), self.msg.hide)])
+            return
+        try:
+            selfupdate.start_swap(prepared)
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger(__name__).exception("入れ替え用プログラムを起動できませんでした")
+            self.msg.show_error(tr("selfupdate.failed", reason=str(e)), str(e))
+            return
+        self.close()
+        QApplication.instance().quit()
 
     # ================================================================== 終了
     def closeEvent(self, ev):

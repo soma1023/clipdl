@@ -52,6 +52,15 @@ def copy_vendor() -> None:
     shutil.copytree(ROOT / "third_party", DIST / "third_party", dirs_exist_ok=True)
 
 
+def copy_updater_and_version() -> None:
+    """入れ替え用プログラムと、版番号のファイル（自動更新で展開した版を確かめるのに使う）を置く。"""
+    upd = ROOT / "build" / "dist" / "clipdl-updater.exe"
+    if not upd.is_file():
+        raise SystemExit(f"{upd} がありません（PyInstaller の出力を確認してください）")
+    shutil.copy2(upd, DIST / "clipdl-updater.exe")
+    (DIST / "VERSION").write_bytes((__version__ + "\n").encode("ascii"))
+
+
 def copy_docs() -> None:
     for name in DOCS:
         src = ROOT / name
@@ -87,11 +96,13 @@ def main() -> int:
     if "--skip-pyinstaller" not in sys.argv:
         run_pyinstaller()
     copy_vendor()
+    copy_updater_and_version()
     copy_docs()
     z = make_zip()
     print(f"配布フォルダ: {DIST}")
     print(f"zip: {z}（{z.stat().st_size / 1048576:.0f} MB）")
     print((z.parent / (z.name + ".sha256")).read_text("utf-8").strip())
+    print(r"次に packaging\sign_release.py で署名してください（更新情報と署名ファイルを作ります）。")
     return 0
 
 

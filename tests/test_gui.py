@@ -69,3 +69,19 @@ def test_window_title_shows_version_and_beta():
         assert "(beta)" in i18n.tr("app.title", version=__version__)
     finally:
         i18n.set_language("ja")
+
+
+def test_message_bar_shows_several_actions_and_clears_after_click(app):
+    from clipdl.gui.widgets import MessageBar
+    bar = MessageBar()
+    clicked = []
+    bar.show_info("新しい版 v9 があります", actions=[("更新する", lambda: clicked.append("u")),
+                                                  ("ダウンロードページを開く", lambda: clicked.append("o"))])
+    assert [b.text() for b in bar.action_buttons] == ["更新する", "ダウンロードページを開く"]
+    bar.action_buttons[1].click()
+    assert clicked == ["o"] and bar.action_buttons == []
+    bar.show_info("x", "ボタン", lambda: clicked.append("single"))   # 従来の 1 つだけの形も使える
+    bar.action_btn.click()
+    assert clicked[-1] == "single"
+    bar.show_error("err")
+    assert bar.action_buttons == []

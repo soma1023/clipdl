@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .. import __version__
+from .paths import env
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +24,13 @@ API_URL = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 CHECK_INTERVAL = 24 * 3600   # 起動時の確認は 1 日 1 回まで
 TIMEOUT = 5.0
+
+TEST_APP_VERSION = "CLIPDL_TEST_APP_VERSION"   # テスト用: 今の版をこの値とみなす（更新の流れを試す）
+
+
+def current_version() -> str:
+    return env(TEST_APP_VERSION) or __version__
+
 
 _VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)(?:\.(\d+))?(?:[-.]?(a|alpha|b|beta|rc)[-.]?(\d*))?$", re.IGNORECASE)
 _PRE_RANK = {"a": 0, "alpha": 0, "b": 1, "beta": 1, "rc": 2}
@@ -98,8 +106,9 @@ class AppUpdateStatus:
         return f"clipdl: {self.current}（最新）"
 
 
-def check_now(fetch: Callable[[], Release | None] = fetch_latest, current: str = __version__) -> AppUpdateStatus:
+def check_now(fetch: Callable[[], Release | None] = fetch_latest, current: str | None = None) -> AppUpdateStatus:
     """その場で確かめる（CLI の --check-update 用）。例外は出さない。"""
+    current = current or current_version()
     try:
         return AppUpdateStatus(current, fetch())
     except Exception as e:  # noqa: BLE001  通信・JSON などどんな失敗でも起動や他の確認を止めない
@@ -108,13 +117,14 @@ def check_now(fetch: Callable[[], Release | None] = fetch_latest, current: str =
 
 
 def check_on_startup(settings, fetch: Callable[[], Release | None] = fetch_latest,
-                     now: float | None = None, current: str = __version__) -> Release | None:
+                     now: float | None = None, current: str | None = None) -> Release | None:
     """起動時の確認。設定で OFF なら何もしない。前回から 24 時間たっていなければ前回の結果を使う。
 
     settings の記録欄を書き換える（保存は呼び出し側で行う）。新しい版があればその Release を返す。
     """
     if not getattr(settings, "check_app_update", True):
         return None
+    current = current or current_version()
     now = time.time() if now is None else now
     last = float(getattr(settings, "app_update_checked_at", 0) or 0)
     if last <= 0 or not (0 <= now - last < CHECK_INTERVAL):   # 未確認・24 時間経過・時計が戻ったときは確認する

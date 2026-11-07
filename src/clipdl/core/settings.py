@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_TEMPLATE = "{date}_{channel}_{title}"
 # 利用規約の版（TERMS.md の「規約の版」と合わせる。上げると次回の起動時にあらためて同意を求める）
-TERMS_VERSION = "2"
+TERMS_VERSION = "3"
 
 
 @dataclass

@@ -68,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="yt-dlp（と yt-dlp-ejs）を取得・署名検証して記録（次回の起動から反映）")
     p.add_argument("--reset-updates", action="store_true", help="更新版の記録を消して同梱版に戻す")
     p.add_argument("--lang", choices=["ja", "en"], default=s.language, help="メッセージの言語")
+    p.add_argument("--self-update", action="store_true",
+                   help="clipdl 本体の新しい版をダウンロード・署名を検証して入れ替える（確認あり。終わると GUI が起動）")
+    p.add_argument("--yes", action="store_true", help="--self-update の確認を省く")
     p.add_argument("--accept-terms", action="store_true", help="利用規約に同意する（初回のみ必要）")
     p.add_argument("-v", "--verbose", action="store_true", help="詳しいログを画面にも出す")
     p.add_argument("--version", action="version", version=f"clipdl {__version__}")
@@ -109,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ログを書き出しました: {export_logs(Path(args.export_logs))}")
         return 0
 
+    if args.self_update:
+        return _self_update(args)
     if args.check_update or args.update or args.reset_updates:
         return _updates(args)
 
@@ -213,6 +218,46 @@ def main(argv: list[str] | None = None) -> int:
     if code:
         print(f"（詳しいログ: {log_path}）", file=sys.stderr)
     return code
+
+
+def _self_update(args) -> int:
+    import os
+
+    from ..core import app_update, selfupdate
+    st = app_update.check_now()
+    print(st.summary())
+    if st.error:
+        return 1
+    rel = st.newer
+    if rel is None:
+        return 0
+    reason = selfupdate.unsupported_reason()
+    if reason:
+        print(f"自動更新できません（{reason}）。ダウンロードページから入手してください: {rel.url}", file=sys.stderr)
+        return 1
+    prepared = selfupdate.find_prepared()
+    if prepared is None or prepared.version != rel.tag.lstrip("v"):
+        last = [None]
+
+        def progress(stage, ratio):
+            key = (stage, None if ratio is None else int(ratio * 10))
+            if key != last[0]:
+                last[0] = key
+                print(f"  … {stage}" + ("" if ratio is None else f" {ratio * 100:.0f}%"))
+        try:
+            prepared = selfupdate.prepare(rel.tag, progress=progress)
+        except selfupdate.SelfUpdateError as e:
+            print(f"自動更新できませんでした（{e}）。ダウンロードページから入手してください: {rel.url}", file=sys.stderr)
+            return 1
+    print(f"clipdl {prepared.version} の準備ができました（{prepared.staging_dir}）")
+    if not args.yes:
+        ans = input("再起動して更新しますか？ [y/N]: ").strip().lower()
+        if ans not in ("y", "yes"):
+            print("更新は次回にします（準備したファイルは残しています）。")
+            return 0
+    selfupdate.start_swap(prepared, pid=os.getpid())
+    print("このあと clipdl を入れ替えて、新しい版の GUI を起動します。")
+    return 0
 
 
 def _updates(args) -> int:
