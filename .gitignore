@@ -29,3 +29,5 @@ docs/mockup/_render.html
 
 # チャットのデザイン比較の画像（実在の配信のチャットが写っているため、リポジトリに入れない）
 docs/chat-style/
+# 説明書に貼る画像（ダミーデータ。背景は Big Buck Bunny (c) Blender Foundation, CC BY 3.0）
+docs/manual/

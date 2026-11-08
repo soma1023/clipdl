@@ -77,3 +77,28 @@ def test_ass_events_do_not_overlap(tmp_path):
     ev = build_vertical_events(msgs, duration=80, style=AssStyle())
     for (a1, b1, _), (a2, _, _) in zip(ev, ev[1:]):
         assert a1 < b1 <= a2 + 1e-9
+
+
+def test_scroll_comments_in_same_lane_keep_a_gap():
+    """ニコニコ風: 同じ行に入れた次のコメントは、前のコメントと全角 1 文字分以上離れている（くっつかない）。"""
+    from clipdl.core.chat.export import WIDE_ADVANCE, ScrollStyle, scroll_events
+    style = ScrollStyle(play_res_y=144)          # 2 行だけにして、同じ行に入る場面を作る
+    gap = style.font_size * WIDE_ADVANCE
+    w = style.play_res_x
+
+    def x_at(e, t):   # コメントの左端の x
+        start, end, _lane, width = e
+        return w - (w + width) * (t - start) / (end - start)
+
+    checked = 0
+    for first in ("空の色きれいすぎる、背景美術ほんとすごい", "88888888", "GG"):
+        for second in ("Thanks for watching! 次回もよろしく", "8888", "このシーン何回見ても好き"):
+            for k in range(1, 100):
+                a, b = scroll_events([ChatMessage(0.0, "u", first), ChatMessage(k * 0.05, "u", second)], style, None)
+                if b[2] != a[2]:
+                    continue                     # 別の行に入った
+                checked += 1
+                for j in range(0, 41):
+                    tt = b[0] + (a[1] - b[0]) * j / 40
+                    assert x_at(b, tt) - (x_at(a, tt) + a[3]) >= gap - 1e-6, (first, second, k)
+    assert checked > 0

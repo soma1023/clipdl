@@ -275,6 +275,7 @@ def scroll_events(messages: list[ChatMessage], style: ScrollStyle,
     w_screen = style.play_res_x
     line_h = style.font_size * style.line_spacing
     lanes = max(1, int((style.play_res_y - 2 * style.margin) // line_h))
+    gap = style.font_size * WIDE_ADVANCE   # 同じ行で前後のコメントのあいだに空ける幅（全角 1 文字分）
     lane_last: list[tuple[float, float] | None] = [None] * lanes  # (開始, 幅px)
     out = []
     for m in sorted((m for m in messages if m.time >= 0), key=lambda m: m.time):
@@ -290,8 +291,9 @@ def scroll_events(messages: list[ChatMessage], style: ScrollStyle,
                 return 0.0
             p_start, p_w = prev
             p_speed = (w_screen + p_w) / style.duration
-            tail_in = p_start + p_w / p_speed                 # 前のコメントの末尾が画面に入る時刻
-            no_catch = p_start + style.duration - w_screen / speed  # これ以降なら左端で追いつかない
+            # 前のコメントの末尾が画面に入り、さらに約 1 文字分の間が空く時刻（幅の見積もりが少し小さくても重ならない）
+            tail_in = p_start + (p_w + gap) / p_speed
+            no_catch = p_start + style.duration - (w_screen - gap) / speed  # これ以降なら左端で追いつかない
             return max(tail_in, no_catch)
 
         free = [free_at(i) for i in range(lanes)]
